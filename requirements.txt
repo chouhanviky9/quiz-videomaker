@@ -1,0 +1,21 @@
+# Google APIs
+google-api-python-client>=2.100.0
+google-auth-httplib2>=0.2.0
+google-auth-oauthlib>=1.2.0
+
+# Gemini AI (TTS)
+google-genai>=1.0.0
+
+# Video / Image
+moviepy>=2.0.0
+Pillow>=10.0.0
+numpy>=1.24.0
+
+# Audio
+pydub>=0.25.1
+
+# Environment
+python-dotenv>=1.0.0
+
+# CLI
+click>=8.1.0

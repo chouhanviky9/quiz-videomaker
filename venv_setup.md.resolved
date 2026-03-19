@@ -1,0 +1,36 @@
+# Setting up a Local Python Environment (Virtual Environment)
+
+To stop dependencies from affecting your global Python installation, we use a **virtual environment**. This isolates all packages (like `moviepy`, `Pillow`, etc.) to this specific project folder.
+
+Since you are on Windows, please follow these simple steps in your terminal, inside the `quiz-video-maker` directory:
+
+### 1. Create the virtual environment
+Run this command to create a folder named `venv` which will contain the isolated Python installation:
+```bash
+python -m venv venv
+```
+
+### 2. Activate the virtual environment
+You must activate this environment whenever you want to run the project or install dependencies:
+```bash
+venv\Scripts\activate
+```
+*(You should see [(venv)](file:///c:/Users/chouh/quiz-video-maker/test.py#6-40) appear at the beginning of your command prompt, indicating it is active. If you use PowerShell, the command is `.\venv\Scripts\Activate.ps1`)*
+
+### 3. Install the project dependencies
+Now that the virtual environment is active, install all required packages isolated from your system Python:
+```bash
+pip install -r requirements.txt
+```
+
+### 4. Run the project
+Now you can safely run the application or the test script:
+```bash
+python test.py
+```
+
+---
+**Note:** If you ever want to leave the virtual environment and go back to your global Python environment, simply run:
+```bash
+deactivate
+```

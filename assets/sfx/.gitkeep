@@ -1,0 +1,5 @@
+Place sound effect files here:
+- tick.mp3       (short tick sound for countdown)
+- correct.mp3    (success chime for correct answer)
+- wrong.mp3      (buzz/error for wrong answers)
+- intro.mp3      (optional intro jingle)

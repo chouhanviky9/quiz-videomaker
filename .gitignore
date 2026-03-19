@@ -1,0 +1,19 @@
+# Environment
+.env
+venv/
+__pycache__/
+*.pyc
+
+# Google OAuth
+credentials.json
+token.json
+
+# Temp build artifacts
+temp/
+output/
+
+# OS
+Thumbs.db
+.DS_Store
+
+credentials
