@@ -10,7 +10,7 @@ from pathlib import Path
 from googleapiclient.http import MediaFileUpload
 
 from auth import get_drive_service
-from config import DRIVE_FOLDER_ID
+from config.constant import DRIVE_FOLDER_ID
 
 logger = logging.getLogger(__name__)
 

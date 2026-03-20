@@ -17,7 +17,7 @@ LOGOS_DIR = ASSETS_DIR / "logos"
 TEMP_DIR = BASE_DIR / "temp"
 AUDIO_DIR = TEMP_DIR / "audio"
 FRAMES_DIR = TEMP_DIR / "frames"
-OUTPUT_DIR = BASE_DIR / "output"
+OUTPUT_DIR = TEMP_DIR / "output" # Moved under temp directory
 
 # Create dirs on import
 for d in (TEMP_DIR, AUDIO_DIR, FRAMES_DIR, OUTPUT_DIR):
@@ -49,27 +49,6 @@ VIDEO_WIDTH = 1920
 VIDEO_HEIGHT = 1080
 FPS = 30
 
-# ── Timing (seconds) ────────────────────────────────────────────────────────
-QUESTION_DURATION = 13       # total time per question
-COUNTDOWN_DURATION = 10      # countdown timer length
-ANSWER_REVEAL_DURATION = 3   # time the correct answer is shown
-INTRO_DURATION = 4           # intro screen hold time
-ENDSCREEN_DURATION = 5       # end screen hold time
-
-# ── Colors (RGB tuples) ─────────────────────────────────────────────────────
-COLOR_BG_BLUE = (26, 58, 138)            # #1a3a8a — main background
-COLOR_HEADER_RED = (239, 68, 68)         # #ef4444 — header bar
-COLOR_HEADER_RED_DARK = (185, 28, 28)    # #b91c1c — header gradient bottom
-COLOR_WHITE = (255, 255, 255)
-COLOR_OPTION_TEXT = (30, 58, 138)        # dark navy for option text
-COLOR_BADGE_ORANGE = (249, 115, 22)      # #f97316 — A/B/C/D badge
-COLOR_BADGE_RED = (220, 38, 38)          # #dc2626 — C/D badge
-COLOR_CORRECT_GREEN = (34, 197, 94)      # #22c55e — correct answer highlight
-COLOR_WRONG_RED = (239, 68, 68)          # #ef4444 — wrong answer highlight
-COLOR_TIMER_GREEN = (74, 222, 128)       # #4ade80 — countdown bar fill
-COLOR_TIMER_BG = (209, 213, 219)         # #d1d5db — countdown bar background
-COLOR_NUMBER_BADGE_BG = (37, 99, 235)    # #2563eb — question number circle
-COLOR_BLACK = (0, 0, 0)
 
 # ── Fonts ────────────────────────────────────────────────────────────────────
 FONT_BOLD = str(FONTS_DIR / "Montserrat-Bold.ttf")

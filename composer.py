@@ -19,15 +19,11 @@ from moviepy import (
     concatenate_videoclips,
 )
 
-from config import (
+from config.config import config
+from config.constant import (
     VIDEO_WIDTH,
     VIDEO_HEIGHT,
     FPS,
-    INTRO_DURATION,
-    ENDSCREEN_DURATION,
-    COLOR_BG_BLUE,
-    COLOR_WHITE,
-    COLOR_HEADER_RED,
     FONT_EXTRABOLD,
     FONT_BOLD,
     SFX_INTRO,
@@ -46,7 +42,7 @@ def _build_intro_clip(title: str, logo_path: Optional[str] = None) -> ImageClip:
     """
     Build an intro screen: blue background, title text, optional logo.
     """
-    img = Image.new("RGB", (VIDEO_WIDTH, VIDEO_HEIGHT), COLOR_BG_BLUE)
+    img = Image.new("RGB", (VIDEO_WIDTH, VIDEO_HEIGHT), config.get("COLOR_BG_BLUE", (26, 58, 138)))
     draw = ImageDraw.Draw(img)
 
     # Title
@@ -72,7 +68,7 @@ def _build_intro_clip(title: str, logo_path: Optional[str] = None) -> ImageClip:
     tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
     ty = (VIDEO_HEIGHT - th) // 2 - 50
     tx = (VIDEO_WIDTH - tw) // 2
-    draw.text((tx, ty), wrapped_title, font=title_font, fill=COLOR_WHITE)
+    draw.text((tx, ty), wrapped_title, font=title_font, fill=config.get("COLOR_WHITE", (255, 255, 255)))
 
     # Optional logo (centered below title)
     if logo_path and Path(logo_path).exists():
@@ -85,7 +81,7 @@ def _build_intro_clip(title: str, logo_path: Optional[str] = None) -> ImageClip:
         except Exception as e:
             logger.warning(f"Could not load logo: {e}")
 
-    return ImageClip(np.array(img), duration=INTRO_DURATION)
+    return ImageClip(np.array(img), duration=config.get("INTRO_DURATION", 5))
 
 
 def _build_endscreen_clip(
@@ -95,7 +91,7 @@ def _build_endscreen_clip(
     """
     Build an end screen: red background, thank-you text, logo.
     """
-    img = Image.new("RGB", (VIDEO_WIDTH, VIDEO_HEIGHT), COLOR_HEADER_RED)
+    img = Image.new("RGB", (VIDEO_WIDTH, VIDEO_HEIGHT), config.get("COLOR_HEADER_RED", (239, 68, 68)))
     draw = ImageDraw.Draw(img)
 
     # Main text
@@ -104,14 +100,14 @@ def _build_endscreen_clip(
     tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
     tx = (VIDEO_WIDTH - tw) // 2
     ty = (VIDEO_HEIGHT - th) // 2 - 80
-    draw.text((tx, ty), title.upper(), font=font, fill=COLOR_WHITE)
+    draw.text((tx, ty), title.upper(), font=font, fill=config.get("COLOR_WHITE", (255, 255, 255)))
 
     # Subtitle
     sub_font = _load_font(FONT_BOLD, 36)
     sub = "SUBSCRIBE & LIKE FOR MORE QUIZZES"
     bbox2 = draw.textbbox((0, 0), sub, font=sub_font)
     sw = bbox2[2] - bbox2[0]
-    draw.text(((VIDEO_WIDTH - sw) // 2, ty + th + 30), sub, font=sub_font, fill=COLOR_WHITE)
+    draw.text(((VIDEO_WIDTH - sw) // 2, ty + th + 30), sub, font=sub_font, fill=config.get("COLOR_WHITE", (255, 255, 255))      )
 
     # Optional logo
     if logo_path and Path(logo_path).exists():
@@ -124,7 +120,7 @@ def _build_endscreen_clip(
         except Exception as e:
             logger.warning(f"Could not load logo: {e}")
 
-    return ImageClip(np.array(img), duration=ENDSCREEN_DURATION)
+    return ImageClip(np.array(img), duration=config.get("ENDSCREEN_DURATION", 5))
 
 
 # ── Main composer ────────────────────────────────────────────────────────────
@@ -141,32 +137,16 @@ def compose_video(
     Compose the full quiz video for a batch.
 
     Steps:
-        1. Build intro clip
-        2. Build per-question clips (with TTS audio + SFX)
-        3. Build end screen clip
-        4. Concatenate all clips
-        5. Optionally overlay background music
-        6. Export as MP4
+        1. Build per-question clips (with TTS audio + SFX)
+        2. Build end screen clip
+        3. Concatenate all clips
+        4. Optionally overlay background music
+        5. Export as MP4
 
     Returns:
         Path to the rendered MP4 file.
     """
     clips = []
-
-    # ── Intro ────────────────────────────────────────────────────────────
-    logger.info(f"Building intro for: {batch_config.title}")
-    intro = _build_intro_clip(batch_config.title, logo_path)
-
-    # Add intro SFX if available
-    try:
-        intro_sfx = AudioFileClip(SFX_INTRO)
-        if intro_sfx.duration > INTRO_DURATION:
-            intro_sfx = intro_sfx.subclipped(0, INTRO_DURATION)
-        intro = intro.with_audio(intro_sfx)
-    except Exception:
-        logger.debug("Intro SFX not found — skipping")
-
-    clips.append(intro)
 
     # ── Question clips ───────────────────────────────────────────────────
     for i, question in enumerate(questions):
@@ -175,42 +155,65 @@ def compose_video(
         clip = build_question_clip(question, audio_path)
         clips.append(clip)
 
-    # ── End screen ───────────────────────────────────────────────────────
-    logger.info("Building end screen")
-    endscreen = _build_endscreen_clip(logo_path=logo_path)
-    clips.append(endscreen)
-
-    # ── Concatenate ──────────────────────────────────────────────────────
-    logger.info(f"Concatenating {len(clips)} clips…")
-    final = concatenate_videoclips(clips, method="compose")
+    # ── Combine Question Clips First ─────────────────────────────────────
+    logger.info(f"Concatenating {len(clips)} question clips…")
+    main_video = concatenate_videoclips(clips, method="compose")
 
     # ── Background music (low volume) ────────────────────────────────────
     if bg_music_path and Path(bg_music_path).exists():
         try:
+            from moviepy import concatenate_audioclips
+            import moviepy as mp
             bg_music = AudioFileClip(bg_music_path)
             # Loop if shorter than video
-            if bg_music.duration < final.duration:
-                loops_needed = int(final.duration / bg_music.duration) + 1
-                from moviepy import concatenate_audioclips
+            if bg_music.duration < main_video.duration:
+                loops_needed = int(main_video.duration / bg_music.duration) + 1
                 bg_music = concatenate_audioclips([bg_music] * loops_needed)
-            bg_music = bg_music.subclipped(0, final.duration).with_volume_scaled(0.15)
-
+            bg_music = bg_music.subclipped(0, main_video.duration)
+            
             # Mix with existing audio
-            if final.audio:
-                mixed = CompositeAudioClip([final.audio, bg_music])
-                final = final.with_audio(mixed)
+            if main_video.audio:
+                mixed = CompositeAudioClip([main_video.audio, bg_music.with_volume_scaled(0.20)])
+                main_video = main_video.with_audio(mixed)
             else:
-                final = final.with_audio(bg_music)
+                main_video = main_video.with_audio(bg_music.with_volume_scaled(0.20))
 
             logger.info("Background music added")
         except Exception as e:
             logger.warning(f"Could not add background music: {e}")
 
+    # ── End screen ───────────────────────────────────────────────────────
+    logger.info("Building end screen")
+    endscreen = _build_endscreen_clip(logo_path=logo_path)
+    
+    end_music_path = "assets/sound/quizEnd.mpeg"
+    if Path(end_music_path).exists():
+        try:
+            end_music = AudioFileClip(end_music_path)
+            if end_music.duration > endscreen.duration:
+                end_music = end_music.subclipped(0, endscreen.duration)
+            else:
+                # If song is shorter than end screen, extend end screen? Or just let it play.
+                # Actually, can also just loop, but typically end screen is just 5 seconds
+                from moviepy import concatenate_audioclips
+                loops_needed = int(endscreen.duration / end_music.duration) + 1
+                end_music = concatenate_audioclips([end_music] * loops_needed)
+                end_music = end_music.subclipped(0, endscreen.duration)
+            endscreen = endscreen.with_audio(end_music.with_volume_scaled(0.20))
+            logger.info("End screen music added")
+        except Exception as e:
+            logger.warning(f"Could not add end screen music: {e}")
+
+    # ── Final Concatenation ──────────────────────────────────────────────
+    final = concatenate_videoclips([main_video, endscreen], method="compose")
+
     # ── Export ────────────────────────────────────────────────────────────
     if output_filename is None:
+        import datetime
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         safe_title = "".join(c if c.isalnum() or c in " -_" else "" for c in batch_config.title)
         safe_title = safe_title.strip().replace(" ", "_")
-        output_filename = f"batch{batch_config.batch}_{safe_title}.mp4"
+        output_filename = f"output_{timestamp}_{safe_title}.mp4"
 
     output_path = OUTPUT_DIR / output_filename
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -222,8 +225,8 @@ def compose_video(
         codec="libx264",
         audio_codec="aac",
         bitrate="8000k",
-        preset="medium",
-        threads=4,
+        preset="ultrafast",
+        threads=8,
         logger="bar",
     )
 

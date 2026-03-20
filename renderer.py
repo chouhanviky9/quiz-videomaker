@@ -29,37 +29,13 @@ from moviepy import (
     VideoClip,
     CompositeVideoClip,
     CompositeAudioClip,
-    ImageClip,
     concatenate_videoclips,
 )
 
-from config import (
+from config.config import config
+from config.constant import (
     VIDEO_WIDTH,
     VIDEO_HEIGHT,
-    FPS,
-    QUESTION_DURATION,
-    COUNTDOWN_DURATION,
-    ANSWER_REVEAL_DURATION,
-    COLOR_BG_BLUE,
-    COLOR_HEADER_RED,
-    COLOR_HEADER_RED_DARK,
-    COLOR_WHITE,
-    COLOR_OPTION_TEXT,
-    COLOR_BADGE_ORANGE,
-    COLOR_BADGE_RED,
-    COLOR_CORRECT_GREEN,
-    COLOR_WRONG_RED,
-    COLOR_TIMER_GREEN,
-    COLOR_TIMER_BG,
-    COLOR_NUMBER_BADGE_BG,
-    COLOR_BLACK,
-    FONT_BOLD,
-    FONT_EXTRABOLD,
-    FONT_REGULAR,
-    SFX_TICK,
-    SFX_CORRECT,
-    SFX_WRONG,
-    FRAMES_DIR,
 )
 from sheets import Question
 
@@ -170,32 +146,40 @@ def _wrap_text(text: str, font: ImageFont.FreeTypeFont, max_width: int) -> str:
 _bg_cache = None
 
 def _get_background_layer() -> tuple:
-    global _bg_cache
-    if _bg_cache is not None:
-        return _bg_cache
-
+    # Removed generic _bg_cache so background color changes reflect dynamically
     SCALE = 2  # Supersampling factor for anti-aliasing shapes/text
     
     def s(val: int | float) -> int:
         return int(val * SCALE)
 
-    img = Image.new("RGB", (s(VIDEO_WIDTH), s(VIDEO_HEIGHT)), COLOR_BG_BLUE)
+    img = Image.new("RGB", (s(VIDEO_WIDTH), s(VIDEO_HEIGHT)), config.get("COLOR_BG_BLUE"))
     draw = ImageDraw.Draw(img)
 
     # ── Header bar (red gradient) ────────────────────────────────────────
     half = s(HEADER_HEIGHT) // 2
-    draw.rectangle([0, 0, s(VIDEO_WIDTH), half], fill=COLOR_HEADER_RED)
-    draw.rectangle([0, half, s(VIDEO_WIDTH), s(HEADER_HEIGHT)], fill=COLOR_HEADER_RED_DARK)
-    draw.rectangle([0, s(HEADER_HEIGHT), s(VIDEO_WIDTH), s(HEADER_HEIGHT + 8)], fill=COLOR_WHITE)
+    draw.rectangle([0, 0, s(VIDEO_WIDTH), half], fill=config.get("COLOR_HEADER_RED"))
+    draw.rectangle([0, half, s(VIDEO_WIDTH), s(HEADER_HEIGHT)], fill=config.get("COLOR_HEADER_RED_DARK"))
+    draw.rectangle([0, s(HEADER_HEIGHT), s(VIDEO_WIDTH), s(HEADER_HEIGHT + 8)], fill=config.get("COLOR_WHITE"))
 
     # Downscale for smooth anti-aliased output
     final_img = img.resize((VIDEO_WIDTH, VIDEO_HEIGHT), Image.Resampling.LANCZOS)
-    _bg_cache = final_img
     return final_img
 
 _badge_cache = {}
 
 def _get_badge_layer(text: str, is_logo: bool = False) -> Image.Image:
+    if is_logo:
+        try:
+            logo_path = Path("assets/logos/video-maker-logo.png")
+            if logo_path.exists():
+                logo_img = Image.open(logo_path).convert("RGBA")
+                size = (NUMBER_BADGE_RADIUS + 5) * 2
+                logo_img.thumbnail((size, size))
+                # Create exactly square container if needed, but returning logo_img is fine 
+                return logo_img
+        except Exception as e:
+            logger.warning(f"Could not load logo in renderer: {e}")
+            
     if text in _badge_cache:
         return _badge_cache[text]
 
@@ -210,15 +194,15 @@ def _get_badge_layer(text: str, is_logo: bool = False) -> Image.Image:
     draw = ImageDraw.Draw(img)
     cx, cy = size // 2, size // 2
 
-    _draw_circle(draw, (cx, cy), s(NUMBER_BADGE_RADIUS + 5), COLOR_WHITE)
-    _draw_circle(draw, (cx, cy), s(NUMBER_BADGE_RADIUS), COLOR_NUMBER_BADGE_BG)
+    _draw_circle(draw, (cx, cy), s(NUMBER_BADGE_RADIUS + 5), config.get("COLOR_WHITE"))
+    _draw_circle(draw, (cx, cy), s(NUMBER_BADGE_RADIUS), config.get("COLOR_NUMBER_BADGE_BG"))
     draw.ellipse(
         [cx - s(NUMBER_BADGE_RADIUS + 5), cy - s(NUMBER_BADGE_RADIUS + 5), cx + s(NUMBER_BADGE_RADIUS + 5), cy + s(NUMBER_BADGE_RADIUS + 5)],
-        outline=COLOR_BLACK,
+        outline=config.get("COLOR_BLACK"),
         width=s(4)
     )
-    num_font = _load_font(FONT_EXTRABOLD, s(36))
-    _text_center(draw, text, num_font, (cx - s(25), cy - s(24), cx + s(25), cy + s(16)), COLOR_WHITE)
+    num_font = _load_font(config.get("FONT_EXTRABOLD"), s(36))
+    _text_center(draw, text, num_font, (cx - s(25), cy - s(24), cx + s(25), cy + s(16)), config.get("COLOR_WHITE"))
 
     final_img = img.resize((size // 2, size // 2), Image.Resampling.LANCZOS)
     _badge_cache[text] = final_img
@@ -244,7 +228,7 @@ def _get_question_text_layer(question: Question) -> Image.Image:
     max_h = s(HEADER_HEIGHT - 60) # leave some padding top and bottom
     
     while font_size >= min_font_size:
-        q_font = _load_font(FONT_EXTRABOLD, s(font_size))
+        q_font = _load_font(config.get("FONT_EXTRABOLD"), s(font_size))
         wrapped = _wrap_text(question.text.upper(), q_font, max_w)
         bbox = draw.textbbox((0, 0), wrapped, font=q_font)
         tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
@@ -256,7 +240,7 @@ def _get_question_text_layer(question: Question) -> Image.Image:
     # Draw centered in the header
     tx = (s(VIDEO_WIDTH) - tw) // 2
     ty = s(30) + (s(HEADER_HEIGHT - 30) - th) // 2
-    draw.text((tx, ty), wrapped, font=q_font, fill=COLOR_WHITE)
+    draw.text((tx, ty), wrapped, font=q_font, fill=config.get("COLOR_WHITE"))
 
     final_img = img.resize((VIDEO_WIDTH, HEADER_HEIGHT), Image.Resampling.LANCZOS)
     _qtext_cache[question.row_index] = final_img
@@ -366,43 +350,43 @@ def _get_option_card_layer(letter: str, text: str, card_state: str = "normal") -
     oy = s(margin)
     
     if card_state == "correct":
-        card_fill = (100, 240, 60, 255) # bright green
-        text_color = COLOR_OPTION_TEXT
-        outline = COLOR_BLACK
+        card_fill = config.get("COLOR_CORRECT_GREEN")
+        text_color = config.get("COLOR_OPTION_TEXT")
+        outline = config.get("COLOR_BLACK")
         width = s(4)
     elif card_state == "wrong":
-        card_fill = (240, 80, 80, 255) # bright red
-        text_color = COLOR_WHITE
-        outline = COLOR_BLACK
+        card_fill = config.get("COLOR_WRONG_RED")
+        text_color = config.get("COLOR_WHITE")
+        outline = config.get("COLOR_BLACK")
         width = s(4)
     else:
-        card_fill = COLOR_WHITE
-        text_color = COLOR_OPTION_TEXT
+        card_fill = config.get("COLOR_WHITE")
+        text_color = config.get("COLOR_OPTION_TEXT")
         outline = None
         width = 0
 
-    opt_font = _load_font(FONT_BOLD, s(42))
-    badge_font = _load_font(FONT_EXTRABOLD, s(36))
+    opt_font = _load_font(config.get("FONT_BOLD"), s(42))
+    badge_font = _load_font(config.get("FONT_EXTRABOLD"), s(36))
 
     _draw_rounded_rect(draw, (ox, oy, ox + s(OPTION_W), oy + s(OPTION_H)), radius=s(55 if card_state != "normal" else 65), fill=card_fill, outline=outline, width=width)
 
-    badge_color = COLOR_BADGE_ORANGE if letter in ("A", "B") else COLOR_BADGE_RED
+    badge_color = config.get("COLOR_BADGE_ORANGE") if letter in ("A", "B") else config.get("COLOR_BADGE_RED")
     badge_cx = ox + s(65)
     badge_cy = oy + s(OPTION_H) // 2
     
     if card_state != "normal":
-        _draw_circle(draw, (badge_cx, badge_cy), s(BADGE_RADIUS + 3), COLOR_BLACK)
+        _draw_circle(draw, (badge_cx, badge_cy), s(BADGE_RADIUS + 3), config.get("COLOR_BLACK"))
     else:
-        _draw_circle(draw, (badge_cx, badge_cy), s(BADGE_RADIUS + 8), COLOR_WHITE)
+        _draw_circle(draw, (badge_cx, badge_cy), s(BADGE_RADIUS + 8), config.get("COLOR_WHITE"))
         draw.ellipse(
             [badge_cx - s(BADGE_RADIUS + 8), badge_cy - s(BADGE_RADIUS + 8), badge_cx + s(BADGE_RADIUS + 8), badge_cy + s(BADGE_RADIUS + 8)],
             fill=None,
-            outline=COLOR_BLACK,
+            outline=config.get("COLOR_BLACK"),
             width=s(4)
         )
         
     _draw_circle(draw, (badge_cx, badge_cy), s(BADGE_RADIUS), badge_color)
-    _text_center(draw, letter, badge_font, (badge_cx - s(20), badge_cy - s(22), badge_cx + s(20), badge_cy + s(14)), COLOR_WHITE)
+    _text_center(draw, letter, badge_font, (badge_cx - s(20), badge_cy - s(22), badge_cx + s(20), badge_cy + s(14)), config.get("COLOR_WHITE"))
 
     text_area_left = ox + s(140)
     text_area_right = ox + s(OPTION_W - 20)
@@ -477,7 +461,7 @@ def render_question_frame(
             draw,
             (TIMER_X, timer_y_anim, TIMER_X + TIMER_W, timer_y_anim + TIMER_H),
             radius=TIMER_RADIUS,
-            fill=COLOR_WHITE,
+            fill=config.get("COLOR_WHITE"),
         )
         pad = 6
         fill_w = int((TIMER_W - 2 * pad) * max(0.0, min(1.0, timer_progress)))
@@ -504,7 +488,7 @@ def render_question_frame(
                 scale = 1.0 + 0.05 * reveal_progress
                 card_w, card_h = card.size
                 scaled_w, scaled_h = int(card_w * scale), int(card_h * scale)
-                scaled_card = card.resize((scaled_w, scaled_h), Image.Resampling.LANCZOS)
+                scaled_card = card.resize((scaled_w, scaled_h), Image.Resampling.BILINEAR)
                 
                 cx = tgt_x - margin + card_w // 2
                 cy = tgt_y - margin + card_h // 2
@@ -525,15 +509,16 @@ def _make_countdown_clip(question: Question) -> VideoClip:
     Build the 10-second countdown phase as a video clip.
     Timer bar smoothly shrinks from full to empty.
     """
-    INTRO_DURATION = 1.0
+    INTRO_DURATION = config.get("INTRO_DURATION")
+    countdown_dur = config.get("COUNTDOWN_DURATION")
     def make_frame(t):
-        progress = 1.0 - (t / COUNTDOWN_DURATION)
+        progress = 1.0 - (t / countdown_dur)
         if t <= INTRO_DURATION:
             intro_p = 1.0 - (1.0 - (t / INTRO_DURATION))**3
             return render_question_frame(question, timer_progress=progress, state="options", intro_progress=intro_p)
         return render_question_frame(question, timer_progress=progress, state="options", intro_progress=1.0)
 
-    frames_clip = VideoClip(make_frame, duration=COUNTDOWN_DURATION)
+    frames_clip = VideoClip(make_frame, duration=countdown_dur)
     return frames_clip
 
 
@@ -550,7 +535,8 @@ def _make_reveal_clip(question: Question) -> VideoClip:
         else:
             return render_question_frame(question, reveal_progress=1.0, state="reveal")
 
-    return VideoClip(make_frame, duration=ANSWER_REVEAL_DURATION)
+    reveal_dur = config.get("ANSWER_REVEAL_DURATION")
+    return VideoClip(make_frame, duration=reveal_dur)
 
 
 def build_question_clip(
@@ -564,6 +550,8 @@ def build_question_clip(
         0–10s: Question displayed, countdown timer, TTS narration
         10–13s: Correct answer highlighted green, wrong answers red
     """
+    countdown_dur = config.get("COUNTDOWN_DURATION")
+
     # Phase 1: countdown (10s)
     countdown_clip = _make_countdown_clip(question)
 
@@ -581,8 +569,8 @@ def build_question_clip(
         try:
             tts_audio = AudioFileClip(str(audio_path))
             # Trim if longer than countdown
-            if tts_audio.duration > COUNTDOWN_DURATION:
-                tts_audio = tts_audio.subclipped(0, COUNTDOWN_DURATION)
+            if tts_audio.duration > countdown_dur:
+                tts_audio = tts_audio.subclipped(0, countdown_dur)
             audio_clips.append(tts_audio)
         except Exception as e:
             logger.warning(f"Could not load TTS audio {audio_path}: {e}")
@@ -594,20 +582,16 @@ def build_question_clip(
         clock_tick = AudioFileClip(str(music_path))
         
         # Iterate through each second of the countdown
-        for sec in range(COUNTDOWN_DURATION-1):
+        for sec in range(int(countdown_dur)-1):
             # Volume starts at 5% (0.05) and increases by 5% (0.05) each second
             volume = 0.05 + (0.05 * sec)
             
             # Create a clip for this second, and set start time
             tick_at_sec = clock_tick.with_start(sec)
             
-            # Apply volume (MoviePy v2 drops volumex() for with_volume_scaled() or multiply_volume)
-            if hasattr(tick_at_sec, 'with_volume_scaled'):
-                tick_at_sec = tick_at_sec.with_volume_scaled(volume)
-            elif hasattr(tick_at_sec, 'multiply_volume'):
-                tick_at_sec = tick_at_sec.multiply_volume(volume)
-            else:
-                tick_at_sec = tick_at_sec.volumex(volume)
+            # Apply volume (MoviePy v2 applies effects differently)
+            import moviepy as mp
+            tick_at_sec = tick_at_sec.with_effects([mp.afx.MultiplyVolume(volume)])
                 
             audio_clips.append(tick_at_sec)
             
@@ -622,7 +606,8 @@ def build_question_clip(
 
     # Correct / Wrong SFX at reveal
     try:
-        correct_sfx = AudioFileClip(SFX_CORRECT).with_start(COUNTDOWN_DURATION)
+        sfx_path = config.get("SFX_CORRECT")
+        correct_sfx = AudioFileClip(sfx_path).with_start(countdown_dur)
         audio_clips.append(correct_sfx)
     except Exception:
         logger.debug("Correct SFX not found — skipping")

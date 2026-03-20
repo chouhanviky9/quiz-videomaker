@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from auth import get_sheets_service
-from config import SPREADSHEET_ID, CONFIG_RANGE, QUESTIONS_RANGE, CONFIG_TAB, QUESTIONS_TAB
+from config.constant import SPREADSHEET_ID, CONFIG_RANGE, QUESTIONS_RANGE, CONFIG_TAB, QUESTIONS_TAB
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +64,7 @@ def fetch_configs(spreadsheet_id: Optional[str] = None) -> list[BatchConfig]:
         .get(spreadsheetId=sid, range=CONFIG_RANGE)  # "CONFIG!A1:B"
         .execute()
     )
+    print(f"Raw config rows: {result.get('values', [])}")
     rows = result.get("values", [])
     settings: dict[str, str] = {}
     status_row_index: int | None = None  # sheet row where STATUS lives
@@ -97,7 +98,6 @@ def fetch_configs(spreadsheet_id: Optional[str] = None) -> list[BatchConfig]:
         video_url=video_url,
         row_index=row_index,
     )
-    print(f"Config: {config}")
     return [config]
 
 
@@ -222,6 +222,54 @@ def _get_sheet_id_by_title(service, spreadsheet_id: str, title: str) -> int:
         if props.get("title") == title:
             return props["sheetId"]
     raise ValueError(f"Sheet tab not found: {title}")
+def move_questions_to_processed(questions: list[Question], spreadsheet_id: Optional[str] = None):
+    """
+    Moves questions from QUESTIONS tab to PROCESSED tab.
+    Appends them to PROCESSED, then deletes them from QUESTIONS bottom-up.
+    """
+    if not questions:
+        return
+    sid = spreadsheet_id or SPREADSHEET_ID
+    service = get_sheets_service()
+    
+    # 1. Append to PROCESSED
+    values_to_append = []
+    for q in questions:
+        values_to_append.append([q.text, q.option_a, q.option_b, q.option_c, q.option_d, q.answer, q.letter])
+        
+    service.spreadsheets().values().append(
+        spreadsheetId=sid,
+        range="PROCESSED!A:G",
+        valueInputOption="RAW",
+        insertDataOption="INSERT_ROWS",
+        body={"values": values_to_append},
+    ).execute()
+    logger.info(f"Appended {len(questions)} questions to PROCESSED tab")
+    
+    # 2. Delete from QUESTIONS
+    questions_sheet_id = _get_sheet_id_by_title(service, sid, "QUESTIONS")
+    row_indices = sorted([q.row_index for q in questions], reverse=True)
+    
+    delete_requests = []
+    for row_index in row_indices:
+        delete_requests.append({
+            "deleteDimension": {
+                "range": {
+                    "sheetId": questions_sheet_id,
+                    "dimension": "ROWS",
+                    "startIndex": row_index - 1,
+                    "endIndex": row_index,
+                }
+            }
+        })
+        
+    if delete_requests:
+        service.spreadsheets().batchUpdate(
+            spreadsheetId=sid,
+            body={"requests": delete_requests},
+        ).execute()
+        logger.info(f"Deleted {len(questions)} rows from QUESTIONS tab")
+
 def insert_result_row_top(values: list[str], spreadsheet_id: Optional[str] = None, tab_name: str = "RESULT") -> None:
     """
     Inserts a new row just below the header in RESULT (row 2), shifting existing rows down,

@@ -16,7 +16,7 @@ from pathlib import Path
 from google import genai
 from google.genai import types
 
-from config import (
+from config.constant import (
     GEMINI_API_KEY,
     TTS_MODEL,
     TTS_SAMPLE_RATE,

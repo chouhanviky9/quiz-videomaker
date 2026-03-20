@@ -101,7 +101,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 import os
 
-from config import SCOPES, GOOGLE_CREDENTIALS_PATH, GOOGLE_TOKEN_PATH
+from config.constant import SCOPES, GOOGLE_CREDENTIALS_PATH, GOOGLE_TOKEN_PATH
 
 def get_oauth_credentials() -> Credentials:
     creds = None
@@ -121,7 +121,7 @@ def get_oauth_credentials() -> Credentials:
     return creds
 
 def get_sheets_service():
-    return build("sheets", "v4", credentials=get_oauth_credentials())
+    return build("sheets", "v4", credentials=get_oauth_credentials(), cache_discovery=False)
 
 def get_drive_service():
-    return build("drive", "v3", credentials=get_oauth_credentials())
+    return build("drive", "v3", credentials=get_oauth_credentials(), cache_discovery=False)
