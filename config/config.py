@@ -18,19 +18,22 @@ class Config:
         # Default configuration data dict
         self._data = {
             # Colors (RGB)
-            "COLOR_BG_BLUE": (26, 58, 138),
-            "COLOR_HEADER_RED": (239, 68, 68),
-            "COLOR_HEADER_RED_DARK": (185, 28, 28),
+            "COLOR_BG_BLUE": (1, 65, 163),
+            "COLOR_HEADER_RED": (225, 77, 77),
+            "COLOR_HEADER_RED_DARK": (225, 77, 77),
             "COLOR_WHITE": (255, 255, 255),
             "COLOR_OPTION_TEXT": (30, 58, 138),
             "COLOR_BADGE_ORANGE": (249, 115, 22),
             "COLOR_BADGE_RED": (220, 38, 38),
+            "COLOR_BADGE_GRADIENT_TOP": (255, 130, 20),
+            "COLOR_BADGE_GRADIENT_BOTTOM": (220, 30, 30),
             "COLOR_CORRECT_GREEN": (34, 197, 94),
             "COLOR_WRONG_RED": (239, 68, 68),
             "COLOR_TIMER_GREEN": (74, 222, 128),
             "COLOR_TIMER_BG": (209, 213, 219),
             "COLOR_NUMBER_BADGE_BG": (37, 99, 235),
             "COLOR_BLACK": (0, 0, 0),
+            "COLOR_SHADOW_DARK": (10, 10, 40),
             
             # Fonts
             "FONT_BOLD": str(FONTS_DIR / "Montserrat-Bold.ttf"),
@@ -56,7 +59,7 @@ class Config:
             "QUESTION_DURATION": 13,       # total time per question
             "COUNTDOWN_DURATION": 10,      # countdown timer length
             "ANSWER_REVEAL_DURATION": 3,   # time the correct answer is shown
-            "INTRO_DURATION": 4,           # intro screen hold time
+            "INTRO_DURATION": 1,           # intro screen hold time
             "ENDSCREEN_DURATION": 5,       # end screen hold time
         }
 

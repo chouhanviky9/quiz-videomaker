@@ -30,14 +30,12 @@ logger = logging.getLogger("quiz-video-maker")
 def process_batch_of_questions(
     batch_config,
     questions: list,
-    spreadsheet_id: str,
     logo_path: str | None,
     bg_music_path: str | None,
     upload: bool,
     batch_number: int,
 ) -> str:
-    """Process a single batch of questions: TTS → render → compose → upload → mark processed."""
-    from sheets import mark_question_processed
+    """Process a single batch of questions: TTS → render → compose → upload."""
     from tts import generate_batch_audio
     from composer import compose_video
     from uploader import upload_to_drive
@@ -81,7 +79,9 @@ def process_batch_of_questions(
 def main():
     logger.info("Starting Quiz Video Maker Watcher...")
     try:
-        while True:
+        a=1
+        while a:
+            a=a-1
             config.refresh()
             spreadsheet_id = SPREADSHEET_ID
             if not spreadsheet_id:
@@ -109,7 +109,6 @@ def main():
                     video_url = process_batch_of_questions(
                         batch_config=batch_config,
                         questions=questions,
-                        spreadsheet_id=spreadsheet_id,
                         logo_path="assets/logos/video-maker-logo.png",
                         bg_music_path=selected_music_path,
                         upload=True,
@@ -122,6 +121,9 @@ def main():
                     
                     logger.info("Moving questions to PROCESSED tab...")
                     move_questions_to_processed(questions, spreadsheet_id)
+                    
+                    logger.info("Marking batch config as DONE...")
+                    mark_batch_done(batch_config, video_url, spreadsheet_id)
                     
                     logger.info("Batch completed successfully!")
                 else:

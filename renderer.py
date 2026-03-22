@@ -96,14 +96,47 @@ def _draw_circle(
     )
 
 
+def _draw_gradient_circle(
+    img: Image.Image,
+    center: tuple[int, int],
+    radius: int,
+    color_top: tuple[int, ...],
+    color_bottom: tuple[int, ...],
+) -> None:
+    """Draw a circle with a vertical gradient (top to bottom) using fast numpy ops."""
+    cx, cy = center
+    size = radius * 2
+    if size <= 0:
+        return
+    # Build circular mask using numpy
+    yy, xx = np.ogrid[:size, :size]
+    dist_sq = (xx - radius + 0.5) ** 2 + (yy - radius + 0.5) ** 2
+    mask_arr = (dist_sq <= radius ** 2).astype(np.uint8) * 255
+    # Build vertical gradient RGBA array
+    t = np.linspace(0, 1, size).reshape(-1, 1)  # (size, 1)
+    ct = np.array(color_top[:3], dtype=np.float32)
+    cb = np.array(color_bottom[:3], dtype=np.float32)
+    grad_colors = (ct + (cb - ct) * t).astype(np.uint8)  # (size, 3)
+    # Expand to full image: (size, size, 4)
+    arr = np.zeros((size, size, 4), dtype=np.uint8)
+    arr[:, :, :3] = grad_colors[:, np.newaxis, :]
+    arr[:, :, 3] = mask_arr
+    gradient_img = Image.fromarray(arr, "RGBA")
+    paste_x = cx - radius
+    paste_y = cy - radius
+    img.paste(gradient_img, (paste_x, paste_y), mask=gradient_img)
+
+
 def _text_center(
     draw: ImageDraw.ImageDraw,
     text: str,
     font: ImageFont.FreeTypeFont,
     area: tuple[int, int, int, int],
     fill: tuple[int, ...],
+    shadow_offset: int = 0,
+    shadow_color: tuple[int, ...] = (0, 0, 0),
 ) -> None:
-    """Draw text centered within a bounding box, aligned exactly by font ascender/descender."""
+    """Draw text centered within a bounding box with optional 3D embossed shadow."""
     x1, y1, x2, y2 = area
     bbox = draw.textbbox((0, 0), text, font=font)
     tw = bbox[2] - bbox[0]
@@ -112,6 +145,9 @@ def _text_center(
     
     tx = x1 + (x2 - x1 - tw) // 2
     ty = y1 + (y2 - y1 - th) // 2 - 5 # slight 5px adjustment for montserrat baseline
+    # 3D embossed shadow
+    if shadow_offset > 0:
+        draw.text((tx + shadow_offset, ty + shadow_offset), text, font=font, fill=shadow_color)
     draw.text((tx, ty), text, font=font, fill=fill)
 
 
@@ -155,11 +191,18 @@ def _get_background_layer() -> tuple:
     img = Image.new("RGB", (s(VIDEO_WIDTH), s(VIDEO_HEIGHT)), config.get("COLOR_BG_BLUE"))
     draw = ImageDraw.Draw(img)
 
-    # ── Header bar (red gradient) ────────────────────────────────────────
+    # ── Header bar (red gradient) with raised effect ─────────────────────
     half = s(HEADER_HEIGHT) // 2
     draw.rectangle([0, 0, s(VIDEO_WIDTH), half], fill=config.get("COLOR_HEADER_RED"))
     draw.rectangle([0, half, s(VIDEO_WIDTH), s(HEADER_HEIGHT)], fill=config.get("COLOR_HEADER_RED_DARK"))
+    # Thick white divider line
     draw.rectangle([0, s(HEADER_HEIGHT), s(VIDEO_WIDTH), s(HEADER_HEIGHT + 8)], fill=config.get("COLOR_WHITE"))
+    # Dark bottom shadow under header for 3D raised effect
+    shadow_dark = config.get("COLOR_SHADOW_DARK")
+    draw.rectangle([0, s(HEADER_HEIGHT + 8), s(VIDEO_WIDTH), s(HEADER_HEIGHT + 20)], fill=shadow_dark)
+    # Softer shadow fade
+    shadow_mid = (shadow_dark[0], shadow_dark[1], shadow_dark[2] + 30)
+    draw.rectangle([0, s(HEADER_HEIGHT + 20), s(VIDEO_WIDTH), s(HEADER_HEIGHT + 28)], fill=shadow_mid)
 
     # Downscale for smooth anti-aliased output
     final_img = img.resize((VIDEO_WIDTH, VIDEO_HEIGHT), Image.Resampling.LANCZOS)
@@ -194,15 +237,22 @@ def _get_badge_layer(text: str, is_logo: bool = False) -> Image.Image:
     draw = ImageDraw.Draw(img)
     cx, cy = size // 2, size // 2
 
+    # Dark bottom shadow for raised 3D effect
+    shadow_offset = s(5)
+    _draw_circle(draw, (cx, cy + shadow_offset), s(NUMBER_BADGE_RADIUS + 6), (10, 10, 40, 160))
+    # White outer ring
     _draw_circle(draw, (cx, cy), s(NUMBER_BADGE_RADIUS + 5), config.get("COLOR_WHITE"))
+    # Inner fill
     _draw_circle(draw, (cx, cy), s(NUMBER_BADGE_RADIUS), config.get("COLOR_NUMBER_BADGE_BG"))
+    # Thick dark border
     draw.ellipse(
         [cx - s(NUMBER_BADGE_RADIUS + 5), cy - s(NUMBER_BADGE_RADIUS + 5), cx + s(NUMBER_BADGE_RADIUS + 5), cy + s(NUMBER_BADGE_RADIUS + 5)],
         outline=config.get("COLOR_BLACK"),
-        width=s(4)
+        width=s(5)
     )
     num_font = _load_font(config.get("FONT_EXTRABOLD"), s(36))
-    _text_center(draw, text, num_font, (cx - s(25), cy - s(24), cx + s(25), cy + s(16)), config.get("COLOR_WHITE"))
+    _text_center(draw, text, num_font, (cx - s(25), cy - s(24), cx + s(25), cy + s(16)), config.get("COLOR_WHITE"),
+                 shadow_offset=s(2), shadow_color=(0, 0, 0))
 
     final_img = img.resize((size // 2, size // 2), Image.Resampling.LANCZOS)
     _badge_cache[text] = final_img
@@ -237,9 +287,12 @@ def _get_question_text_layer(question: Question) -> Image.Image:
             break
         font_size -= 2
 
-    # Draw centered in the header
+    # Draw centered in the header with 3D embossed shadow
     tx = (s(VIDEO_WIDTH) - tw) // 2
     ty = s(30) + (s(HEADER_HEIGHT - 30) - th) // 2
+    # Dark shadow offset for 3D emboss
+    shadow_off = s(3)
+    draw.text((tx + shadow_off, ty + shadow_off), wrapped, font=q_font, fill=(0, 0, 0))
     draw.text((tx, ty), wrapped, font=q_font, fill=config.get("COLOR_WHITE"))
 
     final_img = img.resize((VIDEO_WIDTH, HEADER_HEIGHT), Image.Resampling.LANCZOS)
@@ -339,7 +392,7 @@ def _get_option_card_layer(letter: str, text: str, card_state: str = "normal") -
     def s(val: int | float) -> int:
         return int(val * SCALE)
 
-    margin = 8
+    margin = 16  # increased margin for shadow room
     card_w_2x = s(OPTION_W + margin*2)
     card_h_2x = s(OPTION_H + margin*2)
     
@@ -348,29 +401,45 @@ def _get_option_card_layer(letter: str, text: str, card_state: str = "normal") -
     
     ox = s(margin)
     oy = s(margin)
+    pill_radius = s(OPTION_H) // 2  # fully rounded pill shape
     
     if card_state == "correct":
         card_fill = config.get("COLOR_CORRECT_GREEN")
         text_color = config.get("COLOR_OPTION_TEXT")
         outline = config.get("COLOR_BLACK")
-        width = s(4)
+        border_w = s(4)
     elif card_state == "wrong":
         card_fill = config.get("COLOR_WRONG_RED")
         text_color = config.get("COLOR_WHITE")
         outline = config.get("COLOR_BLACK")
-        width = s(4)
+        border_w = s(4)
     else:
         card_fill = config.get("COLOR_WHITE")
         text_color = config.get("COLOR_OPTION_TEXT")
-        outline = None
-        width = 0
+        outline = config.get("COLOR_BLACK")
+        border_w = s(4)
 
     opt_font = _load_font(config.get("FONT_BOLD"), s(42))
     badge_font = _load_font(config.get("FONT_EXTRABOLD"), s(36))
 
-    _draw_rounded_rect(draw, (ox, oy, ox + s(OPTION_W), oy + s(OPTION_H)), radius=s(55 if card_state != "normal" else 65), fill=card_fill, outline=outline, width=width)
+    # ── Dark bottom shadow for raised 3D depth ──
+    shadow_offset = s(6)
+    shadow_color = (10, 10, 40, 140)
+    _draw_rounded_rect(draw, (ox + s(2), oy + shadow_offset, ox + s(OPTION_W) + s(2), oy + s(OPTION_H) + shadow_offset),
+                       radius=pill_radius, fill=shadow_color)
 
-    badge_color = config.get("COLOR_BADGE_ORANGE") if letter in ("A", "B") else config.get("COLOR_BADGE_RED")
+    # ── Main card pill shape with thick border ──
+    _draw_rounded_rect(draw, (ox, oy, ox + s(OPTION_W), oy + s(OPTION_H)),
+                       radius=pill_radius, fill=card_fill, outline=outline, width=border_w)
+
+    # ── Subtle top highlight for glossy effect ──
+    if card_state == "normal":
+        highlight = Image.new("RGBA", (s(OPTION_W), s(OPTION_H) // 2), (0, 0, 0, 0))
+        h_draw = ImageDraw.Draw(highlight)
+        h_draw.rounded_rectangle((0, 0, s(OPTION_W), s(OPTION_H) // 2), radius=pill_radius, fill=(255, 255, 255, 35))
+        img_2x.paste(Image.alpha_composite(Image.new("RGBA", highlight.size, (0,0,0,0)), highlight), (ox, oy), mask=highlight)
+
+    # ── Badge circle with gradient ──
     badge_cx = ox + s(65)
     badge_cy = oy + s(OPTION_H) // 2
     
@@ -384,13 +453,26 @@ def _get_option_card_layer(letter: str, text: str, card_state: str = "normal") -
             outline=config.get("COLOR_BLACK"),
             width=s(4)
         )
-        
-    _draw_circle(draw, (badge_cx, badge_cy), s(BADGE_RADIUS), badge_color)
-    _text_center(draw, letter, badge_font, (badge_cx - s(20), badge_cy - s(22), badge_cx + s(20), badge_cy + s(14)), config.get("COLOR_WHITE"))
+
+    # Red-orange gradient fill for badge circle
+    grad_top = config.get("COLOR_BADGE_GRADIENT_TOP")
+    grad_bottom = config.get("COLOR_BADGE_GRADIENT_BOTTOM")
+    _draw_gradient_circle(img_2x, (badge_cx, badge_cy), s(BADGE_RADIUS), grad_top, grad_bottom)
+    # Re-acquire draw after pasting gradient
+    draw = ImageDraw.Draw(img_2x)
+    # Thick dark border on badge
+    draw.ellipse(
+        [badge_cx - s(BADGE_RADIUS), badge_cy - s(BADGE_RADIUS), badge_cx + s(BADGE_RADIUS), badge_cy + s(BADGE_RADIUS)],
+        fill=None, outline=config.get("COLOR_BLACK"), width=s(3)
+    )
+    _text_center(draw, letter, badge_font, (badge_cx - s(20), badge_cy - s(22), badge_cx + s(20), badge_cy + s(14)), config.get("COLOR_WHITE"),
+                 shadow_offset=s(2), shadow_color=(0, 0, 0))
 
     text_area_left = ox + s(140)
     text_area_right = ox + s(OPTION_W - 20)
-    _text_center(draw, text.upper(), opt_font, (text_area_left, oy, text_area_right, oy + s(OPTION_H)), text_color)
+    text_shadow = s(2)
+    _text_center(draw, text.upper(), opt_font, (text_area_left, oy, text_area_right, oy + s(OPTION_H)), text_color,
+                 shadow_offset=text_shadow, shadow_color=(0, 0, 0, 60) if card_state == "normal" else (0, 0, 0))
 
     card_1x = img_2x.resize((OPTION_W + margin*2, OPTION_H + margin*2), Image.Resampling.LANCZOS)
     _option_card_cache[key] = card_1x
@@ -414,6 +496,7 @@ def render_question_frame(
     logo = _get_badge_layer("Logo", is_logo=True)
     
     badge_w, badge_h = qnum.size
+    
     tgt_qx = 60 - badge_w // 2
     qx = int(-badge_w + (tgt_qx + badge_w) * intro_progress)
     qy = 60 - badge_h // 2
@@ -441,7 +524,7 @@ def render_question_frame(
         (OPTION_GRID_LEFT, OPTIONS_Y + OPTION_H + OPTION_GAP_Y),
         (OPTION_GRID_LEFT + OPTION_W + OPTION_GAP_X, OPTIONS_Y + OPTION_H + OPTION_GAP_Y),
     ]
-    margin = 8
+    margin = 16  # match the increased margin in _get_option_card_layer
 
     if state == "options":
         # 3. Options (top to down)
@@ -452,16 +535,27 @@ def render_question_frame(
             cy = int(startY + (tgt_y - margin - startY) * intro_progress)
             img.paste(card, (tgt_x - margin, cy), mask=card)
 
-        # 4. Timer bar (bottom to top)
+        # 4. Timer bar (bottom to top) — raised with thick border and shadow
         tgt_timer_y = TIMER_Y
         startY = VIDEO_HEIGHT
         timer_y_anim = int(startY + (tgt_timer_y - startY) * intro_progress)
 
+        # Dark bottom shadow for 3D raised timer
+        shadow_offset = 5
+        _draw_rounded_rect(
+            draw,
+            (TIMER_X + 2, timer_y_anim + shadow_offset, TIMER_X + TIMER_W + 2, timer_y_anim + TIMER_H + shadow_offset),
+            radius=TIMER_RADIUS,
+            fill=(10, 10, 40),
+        )
+        # White track with thick dark border
         _draw_rounded_rect(
             draw,
             (TIMER_X, timer_y_anim, TIMER_X + TIMER_W, timer_y_anim + TIMER_H),
             radius=TIMER_RADIUS,
             fill=config.get("COLOR_WHITE"),
+            outline=config.get("COLOR_BLACK"),
+            width=3,
         )
         pad = 6
         fill_w = int((TIMER_W - 2 * pad) * max(0.0, min(1.0, timer_progress)))
@@ -498,6 +592,9 @@ def render_question_frame(
                 img.paste(scaled_card, (px, py), mask=scaled_card)
             else:
                 img.paste(card, (tgt_x - margin, tgt_y - margin), mask=card)
+
+    # Re-create draw in case it was invalidated by paste operations
+    draw = ImageDraw.Draw(img)
 
     return np.array(img)
 

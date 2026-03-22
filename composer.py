@@ -16,6 +16,7 @@ from moviepy import (
     CompositeAudioClip,
     CompositeVideoClip,
     ImageClip,
+    VideoFileClip,
     concatenate_videoclips,
 )
 
@@ -87,39 +88,32 @@ def _build_intro_clip(title: str, logo_path: Optional[str] = None) -> ImageClip:
 def _build_endscreen_clip(
     title: str = "THANKS FOR WATCHING!",
     logo_path: Optional[str] = None,
-) -> ImageClip:
+) -> VideoFileClip | ImageClip:
     """
-    Build an end screen: red background, thank-you text, logo.
+    Build an end screen using assets/ending.mp4 video.
+    Falls back to a static image end screen if the file is missing.
     """
+    ending_video_path = Path("assets/ending.mp4")
+    if ending_video_path.exists():
+        try:
+            clip = VideoFileClip(str(ending_video_path))
+            # Resize to match video dimensions if needed
+            if clip.size != [VIDEO_WIDTH, VIDEO_HEIGHT]:
+                clip = clip.resized((VIDEO_WIDTH, VIDEO_HEIGHT))
+            logger.info(f"Loaded ending video: {ending_video_path} ({clip.duration:.1f}s)")
+            return clip
+        except Exception as e:
+            logger.warning(f"Could not load ending video: {e}, falling back to static end screen")
+
+    # Fallback: static image end screen
     img = Image.new("RGB", (VIDEO_WIDTH, VIDEO_HEIGHT), config.get("COLOR_HEADER_RED", (239, 68, 68)))
     draw = ImageDraw.Draw(img)
-
-    # Main text
     font = _load_font(FONT_EXTRABOLD, 64)
     bbox = draw.textbbox((0, 0), title.upper(), font=font)
     tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
     tx = (VIDEO_WIDTH - tw) // 2
-    ty = (VIDEO_HEIGHT - th) // 2 - 80
+    ty = (VIDEO_HEIGHT - th) // 2
     draw.text((tx, ty), title.upper(), font=font, fill=config.get("COLOR_WHITE", (255, 255, 255)))
-
-    # Subtitle
-    sub_font = _load_font(FONT_BOLD, 36)
-    sub = "SUBSCRIBE & LIKE FOR MORE QUIZZES"
-    bbox2 = draw.textbbox((0, 0), sub, font=sub_font)
-    sw = bbox2[2] - bbox2[0]
-    draw.text(((VIDEO_WIDTH - sw) // 2, ty + th + 30), sub, font=sub_font, fill=config.get("COLOR_WHITE", (255, 255, 255))      )
-
-    # Optional logo
-    if logo_path and Path(logo_path).exists():
-        try:
-            logo = Image.open(logo_path).convert("RGBA")
-            logo.thumbnail((180, 180))
-            lx = (VIDEO_WIDTH - logo.width) // 2
-            ly = ty + th + 100
-            img.paste(logo, (lx, ly), logo)
-        except Exception as e:
-            logger.warning(f"Could not load logo: {e}")
-
     return ImageClip(np.array(img), duration=config.get("ENDSCREEN_DURATION", 5))
 
 
@@ -185,24 +179,6 @@ def compose_video(
     # ── End screen ───────────────────────────────────────────────────────
     logger.info("Building end screen")
     endscreen = _build_endscreen_clip(logo_path=logo_path)
-    
-    end_music_path = "assets/sound/quizEnd.mpeg"
-    if Path(end_music_path).exists():
-        try:
-            end_music = AudioFileClip(end_music_path)
-            if end_music.duration > endscreen.duration:
-                end_music = end_music.subclipped(0, endscreen.duration)
-            else:
-                # If song is shorter than end screen, extend end screen? Or just let it play.
-                # Actually, can also just loop, but typically end screen is just 5 seconds
-                from moviepy import concatenate_audioclips
-                loops_needed = int(endscreen.duration / end_music.duration) + 1
-                end_music = concatenate_audioclips([end_music] * loops_needed)
-                end_music = end_music.subclipped(0, endscreen.duration)
-            endscreen = endscreen.with_audio(end_music.with_volume_scaled(0.20))
-            logger.info("End screen music added")
-        except Exception as e:
-            logger.warning(f"Could not add end screen music: {e}")
 
     # ── Final Concatenation ──────────────────────────────────────────────
     final = concatenate_videoclips([main_video, endscreen], method="compose")
