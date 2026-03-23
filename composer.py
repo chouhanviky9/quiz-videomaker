@@ -98,8 +98,31 @@ def _build_endscreen_clip(
         try:
             clip = VideoFileClip(str(ending_video_path))
             # Resize to match video dimensions if needed
-            if clip.size != [VIDEO_WIDTH, VIDEO_HEIGHT]:
+            if list(clip.size) != [VIDEO_WIDTH, VIDEO_HEIGHT]:
                 clip = clip.resized((VIDEO_WIDTH, VIDEO_HEIGHT))
+            
+            # Overlay logo
+            if logo_path and Path(logo_path).exists():
+                try:
+                    # Depending on MoviePy version, has_mask might be unneeded or handled differently, 
+                    # but typically v2 ImageClip from RGBA image sets mask automatically.
+                    logo_clip = ImageClip(logo_path).with_duration(clip.duration)
+                    w, h = logo_clip.size
+                    new_w = 300
+                    new_h = int(h * (new_w / w))
+                    logo_clip = logo_clip.resized((new_w, new_h))
+                    lx = (VIDEO_WIDTH - new_w) // 2
+                    # Place logo in the upper third (above the bell)
+                    ly = int(VIDEO_HEIGHT * 0.15) 
+                    logo_clip = logo_clip.with_position((lx, ly))
+                    
+                    # Store original audio before composing
+                    orig_audio = clip.audio
+                    clip = CompositeVideoClip([clip, logo_clip])
+                    clip = clip.with_audio(orig_audio)
+                except Exception as e:
+                    logger.warning(f"Could not overlay logo on ending video: {e}")
+
             logger.info(f"Loaded ending video: {ending_video_path} ({clip.duration:.1f}s)")
             return clip
         except Exception as e:
@@ -153,6 +176,13 @@ def compose_video(
     logger.info(f"Concatenating {len(clips)} question clips…")
     main_video = concatenate_videoclips(clips, method="compose")
 
+    # ── End screen ───────────────────────────────────────────────────────
+    logger.info("Building end screen")
+    endscreen = _build_endscreen_clip(logo_path=logo_path)
+
+    # ── Final Concatenation ──────────────────────────────────────────────
+    final = concatenate_videoclips([main_video, endscreen], method="compose")
+
     # ── Background music (low volume) ────────────────────────────────────
     if bg_music_path and Path(bg_music_path).exists():
         try:
@@ -160,28 +190,22 @@ def compose_video(
             import moviepy as mp
             bg_music = AudioFileClip(bg_music_path)
             # Loop if shorter than video
-            if bg_music.duration < main_video.duration:
-                loops_needed = int(main_video.duration / bg_music.duration) + 1
+            if bg_music.duration < final.duration:
+                loops_needed = int(final.duration / bg_music.duration) + 1
                 bg_music = concatenate_audioclips([bg_music] * loops_needed)
-            bg_music = bg_music.subclipped(0, main_video.duration)
+            bg_music = bg_music.subclipped(0, final.duration)
             
             # Mix with existing audio
-            if main_video.audio:
-                mixed = CompositeAudioClip([main_video.audio, bg_music.with_volume_scaled(0.20)])
-                main_video = main_video.with_audio(mixed)
+            bg_music = bg_music.with_effects([mp.afx.MultiplyVolume(0.80)])
+            if final.audio:
+                mixed = CompositeAudioClip([final.audio, bg_music])
+                final = final.with_audio(mixed)
             else:
-                main_video = main_video.with_audio(bg_music.with_volume_scaled(0.20))
+                final = final.with_audio(bg_music)
 
             logger.info("Background music added")
         except Exception as e:
             logger.warning(f"Could not add background music: {e}")
-
-    # ── End screen ───────────────────────────────────────────────────────
-    logger.info("Building end screen")
-    endscreen = _build_endscreen_clip(logo_path=logo_path)
-
-    # ── Final Concatenation ──────────────────────────────────────────────
-    final = concatenate_videoclips([main_video, endscreen], method="compose")
 
     # ── Export ────────────────────────────────────────────────────────────
     if output_filename is None:

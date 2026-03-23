@@ -27,7 +27,7 @@ class Config:
             "COLOR_BADGE_RED": (220, 38, 38),
             "COLOR_BADGE_GRADIENT_TOP": (255, 130, 20),
             "COLOR_BADGE_GRADIENT_BOTTOM": (220, 30, 30),
-            "COLOR_CORRECT_GREEN": (34, 197, 94),
+            "COLOR_CORRECT_GREEN": (99, 243, 46),
             "COLOR_WRONG_RED": (239, 68, 68),
             "COLOR_TIMER_GREEN": (74, 222, 128),
             "COLOR_TIMER_BG": (209, 213, 219),

@@ -52,7 +52,7 @@ OPTION_GAP_Y = 30
 OPTION_GRID_LEFT = (VIDEO_WIDTH - (2 * OPTION_W + OPTION_GAP_X)) // 2
 TIMER_Y = 920
 TIMER_H = 50
-TIMER_W = 800
+TIMER_W = 960
 TIMER_X = (VIDEO_WIDTH - TIMER_W) // 2
 TIMER_RADIUS = 25
 BADGE_RADIUS = 45
@@ -238,18 +238,18 @@ def _get_badge_layer(text: str, is_logo: bool = False) -> Image.Image:
     cx, cy = size // 2, size // 2
 
     # Dark bottom shadow for raised 3D effect
-    shadow_offset = s(5)
+    shadow_offset = s(2)
     _draw_circle(draw, (cx, cy + shadow_offset), s(NUMBER_BADGE_RADIUS + 6), (10, 10, 40, 160))
     # White outer ring
     _draw_circle(draw, (cx, cy), s(NUMBER_BADGE_RADIUS + 5), config.get("COLOR_WHITE"))
     # Inner fill
     _draw_circle(draw, (cx, cy), s(NUMBER_BADGE_RADIUS), config.get("COLOR_NUMBER_BADGE_BG"))
     # Thick dark border
-    draw.ellipse(
-        [cx - s(NUMBER_BADGE_RADIUS + 5), cy - s(NUMBER_BADGE_RADIUS + 5), cx + s(NUMBER_BADGE_RADIUS + 5), cy + s(NUMBER_BADGE_RADIUS + 5)],
-        outline=config.get("COLOR_BLACK"),
-        width=s(5)
-    )
+    # draw.ellipse(
+    #     [cx - s(NUMBER_BADGE_RADIUS + 5), cy - s(NUMBER_BADGE_RADIUS + 5), cx + s(NUMBER_BADGE_RADIUS + 5), cy + s(NUMBER_BADGE_RADIUS + 5)],
+    #     outline=config.get("COLOR_BLACK"),
+    #     width=s(5)
+    # )
     num_font = _load_font(config.get("FONT_EXTRABOLD"), s(36))
     _text_center(draw, text, num_font, (cx - s(25), cy - s(24), cx + s(25), cy + s(16)), config.get("COLOR_WHITE"),
                  shadow_offset=s(2), shadow_color=(0, 0, 0))
@@ -405,7 +405,7 @@ def _get_option_card_layer(letter: str, text: str, card_state: str = "normal") -
     
     if card_state == "correct":
         card_fill = config.get("COLOR_CORRECT_GREEN")
-        text_color = config.get("COLOR_OPTION_TEXT")
+        text_color = config.get("COLOR_WHITE")
         outline = config.get("COLOR_BLACK")
         border_w = s(4)
     elif card_state == "wrong":
@@ -414,7 +414,7 @@ def _get_option_card_layer(letter: str, text: str, card_state: str = "normal") -
         outline = config.get("COLOR_BLACK")
         border_w = s(4)
     else:
-        card_fill = config.get("COLOR_WHITE")
+        card_fill = (255, 255, 255)
         text_color = config.get("COLOR_OPTION_TEXT")
         outline = config.get("COLOR_BLACK")
         border_w = s(4)
@@ -431,13 +431,6 @@ def _get_option_card_layer(letter: str, text: str, card_state: str = "normal") -
     # ── Main card pill shape with thick border ──
     _draw_rounded_rect(draw, (ox, oy, ox + s(OPTION_W), oy + s(OPTION_H)),
                        radius=pill_radius, fill=card_fill, outline=outline, width=border_w)
-
-    # ── Subtle top highlight for glossy effect ──
-    if card_state == "normal":
-        highlight = Image.new("RGBA", (s(OPTION_W), s(OPTION_H) // 2), (0, 0, 0, 0))
-        h_draw = ImageDraw.Draw(highlight)
-        h_draw.rounded_rectangle((0, 0, s(OPTION_W), s(OPTION_H) // 2), radius=pill_radius, fill=(255, 255, 255, 35))
-        img_2x.paste(Image.alpha_composite(Image.new("RGBA", highlight.size, (0,0,0,0)), highlight), (ox, oy), mask=highlight)
 
     # ── Badge circle with gradient ──
     badge_cx = ox + s(65)
@@ -502,9 +495,11 @@ def render_question_frame(
     qy = 60 - badge_h // 2
     img.paste(qnum, (qx, qy), mask=qnum)
 
-    tgt_lx = 1800 - badge_w // 2
-    lx = int(VIDEO_WIDTH + badge_w - (VIDEO_WIDTH + badge_w - tgt_lx) * intro_progress)
-    img.paste(logo, (lx, qy), mask=logo)
+    logo_w, logo_h = logo.size
+    tgt_lx = 1860 - logo_w // 2
+    lx = int(VIDEO_WIDTH + logo_w - (VIDEO_WIDTH + logo_w - tgt_lx) * intro_progress)
+    logo_qy = 60 - logo_h // 2
+    img.paste(logo, (lx, logo_qy), mask=logo)
 
     # 2. Question text layer (top to down)
     qtext = _get_question_text_layer(question)
