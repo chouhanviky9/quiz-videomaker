@@ -18,6 +18,8 @@ Timeline:
 
 from __future__ import annotations
 
+import base64
+import io
 import logging
 from pathlib import Path
 from typing import Optional
@@ -41,6 +43,45 @@ from sheets import Question
 
 logger = logging.getLogger(__name__)
 
+# ── Logo loader (cached) ────────────────────────────────────────────────────
+_logo_cache: dict[str, Image.Image | None] = {}
+
+
+def _load_logo_from_url(url: str) -> Image.Image | None:
+    """Load a logo image from a URL (https:// or data:image/... base64).
+    Returns an RGBA PIL Image or None on failure."""
+    if url in _logo_cache:
+        return _logo_cache[url]
+
+    img = None
+    try:
+        if url.startswith("data:image"):
+            # data:image/png;base64,iVBOR...
+            header, b64data = url.split(",", 1)
+            img = Image.open(io.BytesIO(base64.b64decode(b64data))).convert("RGBA")
+        elif url.startswith(("http://", "https://")):
+            import urllib.request
+            with urllib.request.urlopen(url, timeout=10) as resp:
+                img = Image.open(io.BytesIO(resp.read())).convert("RGBA")
+        else:
+            logger.warning(f"Unsupported logo URL scheme: {url[:60]}...")
+    except Exception as e:
+        logger.warning(f"Failed to load logo from URL: {e}")
+
+    _logo_cache[url] = img
+    return img
+
+
+def clear_render_caches():
+    """Clear all per-question render caches between batches."""
+    global _clock_tick_loaded
+    _badge_cache.clear()
+    _qtext_cache.clear()
+    _option_card_cache.clear()
+    _static_layer_cache.clear()
+    _timer_mask_cache.clear()
+    _timer_pattern_cache.clear()
+
 # ── Layout constants ─────────────────────────────────────────────────────────
 HEADER_HEIGHT = 280
 HEADER_Y = 0
@@ -52,7 +93,7 @@ OPTION_GAP_Y = 30
 OPTION_GRID_LEFT = (VIDEO_WIDTH - (2 * OPTION_W + OPTION_GAP_X)) // 2
 TIMER_Y = 920
 TIMER_H = 50
-TIMER_W = 960
+TIMER_W = 1104
 TIMER_X = (VIDEO_WIDTH - TIMER_W) // 2
 TIMER_RADIUS = 25
 BADGE_RADIUS = 45
@@ -213,12 +254,21 @@ _badge_cache = {}
 def _get_badge_layer(text: str, is_logo: bool = False) -> Image.Image:
     if is_logo:
         try:
-            logo_path = Path("assets/logos/video-maker-logo.png")
-            if logo_path.exists():
-                logo_img = Image.open(logo_path).convert("RGBA")
+            logo_img = None
+            # 1) Try loading from config URL (set via Google Sheet)
+            logo_url = config.get("VIDEO_TOPRIGHT_LOGO", "")
+            if logo_url:
+                logo_img = _load_logo_from_url(logo_url)
+
+            # 2) Fallback to local file
+            if logo_img is None:
+                logo_path = Path("assets/logos/video-maker-logo.png")
+                if logo_path.exists():
+                    logo_img = Image.open(logo_path).convert("RGBA")
+
+            if logo_img is not None:
                 size = (NUMBER_BADGE_RADIUS + 5) * 2
                 logo_img.thumbnail((size, size))
-                # Create exactly square container if needed, but returning logo_img is fine 
                 return logo_img
         except Exception as e:
             logger.warning(f"Could not load logo in renderer: {e}")
@@ -471,6 +521,100 @@ def _get_option_card_layer(letter: str, text: str, card_state: str = "normal") -
     _option_card_cache[key] = card_1x
     return card_1x
 
+
+# ── Cached static layer per question (badges + text + options at final position) ──
+_static_layer_cache: dict[int, Image.Image] = {}
+
+def _get_static_question_layer(question: Question) -> Image.Image:
+    """Build and cache the RGBA overlay with badges, question text, and option cards
+    at their final (post-intro) positions. This avoids re-compositing ~270+ frames."""
+    if question.row_index in _static_layer_cache:
+        return _static_layer_cache[question.row_index]
+
+    img = Image.new("RGBA", (VIDEO_WIDTH, VIDEO_HEIGHT), (0, 0, 0, 0))
+
+    # Badges
+    qnum = _get_badge_layer(str(question.row_index))
+    logo = _get_badge_layer("Logo", is_logo=True)
+
+    badge_w, badge_h = qnum.size
+    qx = 60 - badge_w // 2
+    qy = 60 - badge_h // 2
+    img.paste(qnum, (qx, qy), mask=qnum)
+
+    logo_w, logo_h = logo.size
+    lx = 1860 - logo_w // 2
+    ly = 60 - logo_h // 2
+    img.paste(logo, (lx, ly), mask=logo)
+
+    # Question text
+    qtext = _get_question_text_layer(question)
+    img.paste(qtext, (0, 0), mask=qtext)
+
+    # Option cards at final positions
+    margin = 16
+    options = [
+        ("A", question.option_a),
+        ("B", question.option_b),
+        ("C", question.option_c),
+        ("D", question.option_d),
+    ]
+    positions = [
+        (OPTION_GRID_LEFT, OPTIONS_Y),
+        (OPTION_GRID_LEFT + OPTION_W + OPTION_GAP_X, OPTIONS_Y),
+        (OPTION_GRID_LEFT, OPTIONS_Y + OPTION_H + OPTION_GAP_Y),
+        (OPTION_GRID_LEFT + OPTION_W + OPTION_GAP_X, OPTIONS_Y + OPTION_H + OPTION_GAP_Y),
+    ]
+    for (letter, text), (tgt_x, tgt_y) in zip(options, positions):
+        card = _get_option_card_layer(letter, text)
+        img.paste(card, (tgt_x - margin, tgt_y - margin), mask=card)
+
+    _static_layer_cache[question.row_index] = img
+    return img
+
+
+# ── Timer bar drawing (extracted for reuse) ──────────────────────────────────
+_timer_mask_cache: dict[int, Image.Image] = {}
+
+def _draw_timer_bar(draw: ImageDraw.ImageDraw, img: Image.Image, timer_y: int, timer_progress: float) -> None:
+    """Draw the timer bar at the given Y position with the given progress."""
+    # Dark bottom shadow for 3D raised timer
+    shadow_offset = 5
+    _draw_rounded_rect(
+        draw,
+        (TIMER_X + 2, timer_y + shadow_offset, TIMER_X + TIMER_W + 2, timer_y + TIMER_H + shadow_offset),
+        radius=TIMER_RADIUS,
+        fill=(10, 10, 40),
+    )
+    # White track with thick dark border
+    _draw_rounded_rect(
+        draw,
+        (TIMER_X, timer_y, TIMER_X + TIMER_W, timer_y + TIMER_H),
+        radius=TIMER_RADIUS,
+        fill=config.get("COLOR_WHITE"),
+        outline=config.get("COLOR_BLACK"),
+        width=3,
+    )
+    pad = 6
+    fill_w = int((TIMER_W - 2 * pad) * max(0.0, min(1.0, timer_progress)))
+
+    if fill_w > (TIMER_RADIUS - pad) * 2:
+        inner_h = TIMER_H - 2 * pad
+        pattern = _get_timer_pattern(timer_progress)
+
+        # Cache the rounded-rect mask by fill_w to avoid redrawing
+        if fill_w not in _timer_mask_cache:
+            mask = Image.new("L", (fill_w, inner_h), 0)
+            mask_draw = ImageDraw.Draw(mask)
+            mask_draw.rounded_rectangle((0, 0, fill_w, inner_h), radius=TIMER_RADIUS - pad, fill=255)
+            _timer_mask_cache[fill_w] = mask
+        else:
+            mask = _timer_mask_cache[fill_w]
+
+        pattern_cropped = pattern.crop((0, 0, fill_w, inner_h))
+        img.paste(pattern_cropped, (TIMER_X + pad, timer_y + pad), mask=mask)
+
+
 def render_question_frame(
     question: Question,
     timer_progress: float = 1.0,
@@ -484,29 +628,6 @@ def render_question_frame(
     img = _get_background_layer().copy()
     draw = ImageDraw.Draw(img)
 
-    # 1. Question number and Logo (left to right / right to left)
-    qnum = _get_badge_layer(str(question.row_index))
-    logo = _get_badge_layer("Logo", is_logo=True)
-    
-    badge_w, badge_h = qnum.size
-    
-    tgt_qx = 60 - badge_w // 2
-    qx = int(-badge_w + (tgt_qx + badge_w) * intro_progress)
-    qy = 60 - badge_h // 2
-    img.paste(qnum, (qx, qy), mask=qnum)
-
-    logo_w, logo_h = logo.size
-    tgt_lx = 1860 - logo_w // 2
-    lx = int(VIDEO_WIDTH + logo_w - (VIDEO_WIDTH + logo_w - tgt_lx) * intro_progress)
-    logo_qy = 60 - logo_h // 2
-    img.paste(logo, (lx, logo_qy), mask=logo)
-
-    # 2. Question text layer (top to down)
-    qtext = _get_question_text_layer(question)
-    qw, qh = qtext.size
-    ty = int(-qh + qh * intro_progress)
-    img.paste(qtext, (0, ty), mask=qtext)
-
     options = [
         ("A", question.option_a),
         ("B", question.option_b),
@@ -519,52 +640,52 @@ def render_question_frame(
         (OPTION_GRID_LEFT, OPTIONS_Y + OPTION_H + OPTION_GAP_Y),
         (OPTION_GRID_LEFT + OPTION_W + OPTION_GAP_X, OPTIONS_Y + OPTION_H + OPTION_GAP_Y),
     ]
-    margin = 16  # match the increased margin in _get_option_card_layer
+    margin = 16
+
+    # ── During intro animation, elements move — cannot use cached static layer ──
+    if intro_progress < 1.0:
+        # 1. Question number and Logo (left to right / right to left)
+        qnum = _get_badge_layer(str(question.row_index))
+        logo = _get_badge_layer("Logo", is_logo=True)
+        badge_w, badge_h = qnum.size
+        tgt_qx = 60 - badge_w // 2
+        qx = int(-badge_w + (tgt_qx + badge_w) * intro_progress)
+        qy = 60 - badge_h // 2
+        img.paste(qnum, (qx, qy), mask=qnum)
+
+        logo_w, logo_h = logo.size
+        tgt_lx = 1860 - logo_w // 2
+        lx = int(VIDEO_WIDTH + logo_w - (VIDEO_WIDTH + logo_w - tgt_lx) * intro_progress)
+        logo_qy = 60 - logo_h // 2
+        img.paste(logo, (lx, logo_qy), mask=logo)
+
+        # 2. Question text layer (top to down)
+        qtext = _get_question_text_layer(question)
+        qw, qh = qtext.size
+        ty = int(-qh + qh * intro_progress)
+        img.paste(qtext, (0, ty), mask=qtext)
+
+        if state == "options":
+            for (letter, text), (tgt_x, tgt_y) in zip(options, positions):
+                card = _get_option_card_layer(letter, text)
+                startY = HEADER_HEIGHT
+                cy = int(startY + (tgt_y - margin - startY) * intro_progress)
+                img.paste(card, (tgt_x - margin, cy), mask=card)
+
+            # Timer bar
+            tgt_timer_y = TIMER_Y
+            startY = VIDEO_HEIGHT
+            timer_y_anim = int(startY + (tgt_timer_y - startY) * intro_progress)
+            _draw_timer_bar(draw, img, timer_y_anim, timer_progress)
+
+        return np.array(img)
+
+    # ── After intro: use cached static layer (badges + question + options) ──
+    static = _get_static_question_layer(question)
+    img.paste(static, (0, 0), mask=static)
 
     if state == "options":
-        # 3. Options (top to down)
-        for (letter, text), (tgt_x, tgt_y) in zip(options, positions):
-            card = _get_option_card_layer(letter, text)
-            # Start animation from the bottom of the header (top of the second section)
-            startY = HEADER_HEIGHT
-            cy = int(startY + (tgt_y - margin - startY) * intro_progress)
-            img.paste(card, (tgt_x - margin, cy), mask=card)
-
-        # 4. Timer bar (bottom to top) — raised with thick border and shadow
-        tgt_timer_y = TIMER_Y
-        startY = VIDEO_HEIGHT
-        timer_y_anim = int(startY + (tgt_timer_y - startY) * intro_progress)
-
-        # Dark bottom shadow for 3D raised timer
-        shadow_offset = 5
-        _draw_rounded_rect(
-            draw,
-            (TIMER_X + 2, timer_y_anim + shadow_offset, TIMER_X + TIMER_W + 2, timer_y_anim + TIMER_H + shadow_offset),
-            radius=TIMER_RADIUS,
-            fill=(10, 10, 40),
-        )
-        # White track with thick dark border
-        _draw_rounded_rect(
-            draw,
-            (TIMER_X, timer_y_anim, TIMER_X + TIMER_W, timer_y_anim + TIMER_H),
-            radius=TIMER_RADIUS,
-            fill=config.get("COLOR_WHITE"),
-            outline=config.get("COLOR_BLACK"),
-            width=3,
-        )
-        pad = 6
-        fill_w = int((TIMER_W - 2 * pad) * max(0.0, min(1.0, timer_progress)))
-
-        if fill_w > (TIMER_RADIUS - pad) * 2:
-            inner_h = TIMER_H - 2 * pad
-            pattern = _get_timer_pattern(timer_progress)
-            
-            mask = Image.new("L", (fill_w, inner_h), 0)
-            mask_draw = ImageDraw.Draw(mask)
-            mask_draw.rounded_rectangle((0, 0, fill_w, inner_h), radius=TIMER_RADIUS - pad, fill=255)
-            
-            pattern_cropped = pattern.crop((0, 0, fill_w, inner_h))
-            img.paste(pattern_cropped, (TIMER_X + pad, timer_y_anim + pad), mask=mask)
+        _draw_timer_bar(draw, img, TIMER_Y, timer_progress)
 
     elif state in ("reveal", "empty"):
         # Reveal animation: scale up correct option
@@ -572,29 +693,41 @@ def render_question_frame(
             is_correct = (letter == question.letter)
             card_state = "correct" if is_correct else "wrong"
             card = _get_option_card_layer(letter, text, card_state)
-            
+
             if is_correct:
                 scale = 1.0 + 0.05 * reveal_progress
                 card_w, card_h = card.size
                 scaled_w, scaled_h = int(card_w * scale), int(card_h * scale)
                 scaled_card = card.resize((scaled_w, scaled_h), Image.Resampling.BILINEAR)
-                
+
                 cx = tgt_x - margin + card_w // 2
                 cy = tgt_y - margin + card_h // 2
                 px = cx - scaled_w // 2
                 py = cy - scaled_h // 2
-                
+
                 img.paste(scaled_card, (px, py), mask=scaled_card)
             else:
                 img.paste(card, (tgt_x - margin, tgt_y - margin), mask=card)
 
-    # Re-create draw in case it was invalidated by paste operations
-    draw = ImageDraw.Draw(img)
-
     return np.array(img)
 
-
 # ── Clip builders ────────────────────────────────────────────────────────────
+
+# Cache the clock tick audio clip (loaded once, reused for all questions)
+_clock_tick_cache: list[AudioFileClip | None] = [None]
+_clock_tick_loaded: bool = False
+
+def _get_clock_tick_audio() -> AudioFileClip | None:
+    global _clock_tick_loaded
+    if not _clock_tick_loaded:
+        _clock_tick_loaded = True
+        try:
+            music_path = Path(__file__).resolve().parent / "assets" / "sound" / "clock-tick-second.mp3"
+            if music_path.exists():
+                _clock_tick_cache[0] = AudioFileClip(str(music_path))
+        except Exception as e:
+            logger.warning(f"Could not load clock tick audio: {e}")
+    return _clock_tick_cache[0]
 
 def _make_countdown_clip(question: Question) -> VideoClip:
     """
@@ -616,16 +749,19 @@ def _make_countdown_clip(question: Question) -> VideoClip:
 
 def _make_reveal_clip(question: Question) -> VideoClip:
     """Build the 3-second answer reveal phase as a video clip."""
-    ANIMATION_DURATION = 0.5 
-    
+    ANIMATION_DURATION = 0.5
+    # Cache the final frame (reveal_progress=1.0) — reused for ~2.5s of the 3s reveal
+    _final_frame = [None]
+
     def make_frame(t):
         if t < ANIMATION_DURATION:
-            # Ease out interpolator
             progress = t / ANIMATION_DURATION
             eased = 1.0 - (1.0 - progress)**3
             return render_question_frame(question, reveal_progress=eased, state="reveal")
         else:
-            return render_question_frame(question, reveal_progress=1.0, state="reveal")
+            if _final_frame[0] is None:
+                _final_frame[0] = render_question_frame(question, reveal_progress=1.0, state="reveal")
+            return _final_frame[0]
 
     reveal_dur = config.get("ANSWER_REVEAL_DURATION")
     return VideoClip(make_frame, duration=reveal_dur)
@@ -669,31 +805,15 @@ def build_question_clip(
 
     # Clock tick sound effect (plays every second during countdown with increasing volume)
     try:
-        # Use absolute path to ensure it always finds the file
-        music_path = Path(__file__).resolve().parent / "assets" / "sound" / "clock-tick-second.mp3"
-        clock_tick = AudioFileClip(str(music_path))
-        
-        # Iterate through each second of the countdown
-        for sec in range(int(countdown_dur)-1):
-            # Volume starts at 5% (0.05) and increases by 5% (0.05) each second
-            volume = 0.05 + (0.05 * sec)
-            
-            # Create a clip for this second, and set start time
-            tick_at_sec = clock_tick.with_start(sec)
-            
-            # Apply volume (MoviePy v2 applies effects differently)
+        clock_tick = _get_clock_tick_audio()
+        if clock_tick is not None:
             import moviepy as mp
-            tick_at_sec = tick_at_sec.with_effects([mp.afx.MultiplyVolume(volume)])
-                
-            audio_clips.append(tick_at_sec)
-            
+            for sec in range(int(countdown_dur)-1):
+                volume = 0.05 + (0.05 * sec)
+                tick_at_sec = clock_tick.with_start(sec)
+                tick_at_sec = tick_at_sec.with_effects([mp.afx.MultiplyVolume(volume)])
+                audio_clips.append(tick_at_sec)
     except Exception as e:
-        import traceback
-        print("\n\n=== MOVIEPY AUDIO ERROR ===")
-        print(f"Failed to load: clock-tick-second.mp3")
-        print(f"File exists: {music_path.exists()}")
-        print(f"Exact error: {e}")
-        print("===========================\n\n")
         logger.debug(f"clock-tick-second.mp3 not found or error — skipping: {e}")
 
     # Correct / Wrong SFX at reveal

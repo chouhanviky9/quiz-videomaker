@@ -61,6 +61,9 @@ class Config:
             "ANSWER_REVEAL_DURATION": 3,   # time the correct answer is shown
             "INTRO_DURATION": 1,           # intro screen hold time
             "ENDSCREEN_DURATION": 5,       # end screen hold time
+
+            # Dynamic logo URL (loaded from CONFIG sheet, can be https:// or data:image/... base64)
+            "VIDEO_TOPRIGHT_LOGO": "",
         }
 
     # ─────────────────────────────────────────────────────────────────────────

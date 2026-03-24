@@ -16,6 +16,10 @@ def clear_temp_directory():
         # Recreate dirs immediately
         for d in (TEMP_DIR, AUDIO_DIR, FRAMES_DIR, OUTPUT_DIR):
             d.mkdir(parents=True, exist_ok=True)
+
+        # Clear renderer caches for the new batch
+        from renderer import clear_render_caches
+        clear_render_caches()
     except Exception as e:
         logger.error(f"Failed to clear temp directory: {e}")
 
@@ -92,9 +96,9 @@ def main():
                 batch_config = configs[0]
                 
                 # Check the dropdown switch
-                if str(batch_config.status).strip().lower() != "start":
-                    time.sleep(5)
-                    continue
+                # if str(batch_config.status).strip().lower() != "start":
+                #     time.sleep(5)
+                #     continue
 
                 logger.info("Detected 'Start'! Changing status to 'Processing'...")
                 from sheets import set_config_status

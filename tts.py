@@ -146,9 +146,22 @@ def generate_batch_audio(
     language: str,
     voice: str | None = None,
 ) -> list[Path]:
-    """Generate TTS audio for all questions. Returns list of WAV paths."""
-    paths: list[Path] = []
-    for q in questions:
-        path = generate_question_audio(q, language, voice)
-        paths.append(path)
-    return paths
+    """Generate TTS audio for all questions in parallel. Returns list of WAV paths."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    paths: dict[int, Path] = {}
+
+    def _gen(idx: int, q: Question) -> tuple[int, Path]:
+        return idx, generate_question_audio(q, language, voice)
+
+    # Use up to 4 threads (IO-bound Gemini API calls)
+    max_workers = min(4, len(questions))
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {pool.submit(_gen, i, q): i for i, q in enumerate(questions)}
+        for future in as_completed(futures):
+            idx, path = future.result()
+            paths[idx] = path
+            logger.info(f"TTS {idx + 1}/{len(questions)} done → {path.name}")
+
+    # Return in original order
+    return [paths[i] for i in range(len(questions))]
