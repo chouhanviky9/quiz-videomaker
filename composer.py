@@ -101,22 +101,35 @@ def _build_endscreen_clip(
             if list(clip.size) != [VIDEO_WIDTH, VIDEO_HEIGHT]:
                 clip = clip.resized((VIDEO_WIDTH, VIDEO_HEIGHT))
             
-            # Overlay logo
-            if logo_path and Path(logo_path).exists():
+            # Overlay logo — try dynamic config URL first, fallback to local file
+            logo_img = None
+            try:
+                from renderer import _load_logo_from_url
+                logo_url = config.get("VIDEO_TOPRIGHT_LOGO", "")
+                if logo_url:
+                    logo_img = _load_logo_from_url(logo_url)
+            except Exception:
+                pass
+
+            if logo_img is None and logo_path and Path(logo_path).exists():
                 try:
-                    # Depending on MoviePy version, has_mask might be unneeded or handled differently, 
-                    # but typically v2 ImageClip from RGBA image sets mask automatically.
-                    logo_clip = ImageClip(logo_path).with_duration(clip.duration)
-                    w, h = logo_clip.size
+                    logo_img = Image.open(logo_path).convert("RGBA")
+                except Exception:
+                    pass
+
+            if logo_img is not None:
+                try:
                     new_w = 300
+                    w, h = logo_img.size
                     new_h = int(h * (new_w / w))
-                    logo_clip = logo_clip.resized((new_w, new_h))
+                    logo_img = logo_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+                    # Convert PIL RGBA image to a MoviePy ImageClip via numpy
+                    logo_clip = ImageClip(np.array(logo_img)).with_duration(clip.duration)
                     lx = (VIDEO_WIDTH - new_w) // 2
-                    # Place logo in the upper third (above the bell)
-                    ly = int(VIDEO_HEIGHT * 0.15) 
+                    ly = int(VIDEO_HEIGHT * 0.15)
                     logo_clip = logo_clip.with_position((lx, ly))
-                    
-                    # Store original audio before composing
+
                     orig_audio = clip.audio
                     clip = CompositeVideoClip([clip, logo_clip])
                     clip = clip.with_audio(orig_audio)
@@ -163,14 +176,55 @@ def compose_video(
     Returns:
         Path to the rendered MP4 file.
     """
-    clips = []
+    # ── Render question clips in parallel to temp files ─────────────────
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    import tempfile
 
-    # ── Question clips ───────────────────────────────────────────────────
-    for i, question in enumerate(questions):
-        logger.info(f"Building clip for Q{i + 1} ({i + 1}/{len(questions)})")
-        audio_path = audio_paths[i] if i < len(audio_paths) else None
+    temp_dir = OUTPUT_DIR / "tmp_clips"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+
+    def _render_one(idx: int, question: Question, audio_path: Optional[Path]) -> tuple[int, Path]:
+        """Render a single question clip to a temp MP4 file."""
+        logger.info(f"Building clip for Q{idx + 1} ({idx + 1}/{len(questions)})")
         clip = build_question_clip(question, audio_path)
-        clips.append(clip)
+        tmp_path = temp_dir / f"q_{idx:03d}.mp4"
+        clip.write_videofile(
+            str(tmp_path),
+            fps=FPS,
+            codec="libx264",
+            audio_codec="aac",
+            bitrate="8000k",
+            preset="ultrafast",
+            threads=2,
+            logger=None,
+        )
+        clip.close()
+        logger.info(f"✓ Q{idx + 1} rendered → {tmp_path.name}")
+        return idx, tmp_path
+
+    # Render all question clips in parallel (2 workers to balance CPU vs memory)
+    max_workers = min(2, len(questions))
+    rendered_paths: dict[int, Path] = {}
+
+    if len(questions) > 1:
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = {}
+            for i, question in enumerate(questions):
+                audio_path = audio_paths[i] if i < len(audio_paths) else None
+                futures[pool.submit(_render_one, i, question, audio_path)] = i
+            for future in as_completed(futures):
+                idx, path = future.result()
+                rendered_paths[idx] = path
+    else:
+        # Single question — no overhead from threading
+        audio_path = audio_paths[0] if audio_paths else None
+        idx, path = _render_one(0, questions[0], audio_path)
+        rendered_paths[idx] = path
+
+    # Load rendered clips in order and concatenate
+    clips = []
+    for i in range(len(questions)):
+        clips.append(VideoFileClip(str(rendered_paths[i])))
 
     # ── Combine Question Clips First ─────────────────────────────────────
     logger.info(f"Concatenating {len(clips)} question clips…")
