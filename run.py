@@ -91,10 +91,9 @@ def main():
                 continue
             # print(batch_size = int(config.get("BATCH_SIZE", 2)))
             # return
-            configs = fetch_configs(spreadsheet_id)
+            configs, _raw_settings = fetch_configs(spreadsheet_id)
             if configs:
                 batch_config = configs[0]
-                
                 # Check the dropdown switch
                 # if str(batch_config.status).strip().lower() != "start":
                 #     time.sleep(5)

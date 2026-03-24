@@ -118,7 +118,8 @@ def fetch_configs(spreadsheet_id: Optional[str] = None) -> list[BatchConfig]:
         video_url=video_url,
         row_index=row_index,
     )
-    return [config]
+    # Return both the typed config and the raw settings dict (has ALL sheet keys)
+    return [config], settings
 
 
 def fetch_questions(spreadsheet_id: Optional[str] = None) -> list[Question]:

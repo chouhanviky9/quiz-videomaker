@@ -90,6 +90,21 @@ class Config:
 
     def set(self, key, value):
         old_value = self._data.get(key)
+
+        # Auto-coerce string values to match the type of the existing default
+        if isinstance(value, str) and old_value is not None:
+            try:
+                if isinstance(old_value, int):
+                    value = int(value)
+                elif isinstance(old_value, float):
+                    value = float(value)
+                elif isinstance(old_value, tuple):
+                    # Parse "(R, G, B)" or "R, G, B" strings into tuples
+                    cleaned = value.strip().strip("()")
+                    value = tuple(int(x.strip()) for x in cleaned.split(","))
+            except (ValueError, TypeError):
+                pass  # Keep as string if conversion fails
+
         self._data[key] = value
         
         # Only notify hooks if the value actually changed
@@ -109,17 +124,14 @@ class Config:
         """Fetch config from Google sheets and update the local store."""
         try:
             from sheets import fetch_configs
-            sheet_data = fetch_configs()
-            if sheet_data:
-                # fetch_configs returns a list of BatchConfig dataclass objects
-                if isinstance(sheet_data, list):
-                    import dataclasses
-                    # Convert the first BatchConfig object into a dict and uppercase the keys
-                    config_dict = {k.upper(): v for k, v in dataclasses.asdict(sheet_data[0]).items()}
-                    print(f"Fetched config from sheet: {config_dict}")
-                    self.update_from_dict(config_dict)
-                elif isinstance(sheet_data, dict):
-                    self.update_from_dict(sheet_data)
+            result = fetch_configs()
+            if result:
+                configs, raw_settings = result
+                # Use raw_settings dict which has ALL key-value pairs from the sheet
+                # (BatchConfig only has a subset of fields)
+                if raw_settings:
+                    print(f"Fetched config from sheet: {raw_settings}")
+                    self.update_from_dict(raw_settings)
         except ImportError as e:
             print(f"Warning: Could not fetch configs. Error: {e}")
 

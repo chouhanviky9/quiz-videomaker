@@ -196,7 +196,7 @@ def compose_video(
             bg_music = bg_music.subclipped(0, final.duration)
             
             # Mix with existing audio
-            bg_music = bg_music.with_effects([mp.afx.MultiplyVolume(0.80)])
+            bg_music = bg_music.with_effects([mp.afx.MultiplyVolume(1.0)])
             if final.audio:
                 mixed = CompositeAudioClip([final.audio, bg_music])
                 final = final.with_audio(mixed)
