@@ -79,9 +79,7 @@ def process_batch_of_questions(
 def main():
     logger.info("Starting Quiz Video Maker Watcher...")
     try:
-        a=1
-        while a:
-            a=a-1
+        while True:
             config.refresh()
             spreadsheet_id = SPREADSHEET_ID
             if not spreadsheet_id:
@@ -92,6 +90,16 @@ def main():
             configs = fetch_configs(spreadsheet_id)
             if configs:
                 batch_config = configs[0]
+                
+                # Check the dropdown switch
+                if str(batch_config.status).strip().lower() != "start":
+                    time.sleep(5)
+                    continue
+
+                logger.info("Detected 'Start'! Changing status to 'Processing'...")
+                from sheets import set_config_status
+                set_config_status(batch_config.row_index, "Processing", spreadsheet_id)
+
                 batch_size = int(config.get("BATCH_SIZE", 2))
                 
                 questions = get_pending_questions(spreadsheet_id, limit=batch_size)
@@ -126,8 +134,12 @@ def main():
                     mark_batch_done(batch_config, video_url, spreadsheet_id)
                     
                     logger.info("Batch completed successfully!")
+                    logger.info("Resetting status to 'Stopped'...")
+                    set_config_status(batch_config.row_index, "Stopped", spreadsheet_id)
                 else:
                     logger.info(f"Listening... Not enough questions yet {len(questions)}/{batch_size}.")
+                    logger.info("Resetting status to 'Stopped'...")
+                    set_config_status(batch_config.row_index, "Stopped", spreadsheet_id)
                 
             time.sleep(5)
 

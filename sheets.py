@@ -76,7 +76,7 @@ def fetch_configs(spreadsheet_id: Optional[str] = None) -> list[BatchConfig]:
             continue
         value = row[1].strip() if len(row) > 1 else ""
         settings[key.upper()] = value
-        if key.upper() == "STATUS":
+        if key.upper() in ("STATUS", "GENERATION_SWITCH"):
             # CONFIG_RANGE starts at row 1 → sheet row = i + 1
             status_row_index = i + 1
     # Extract fields with defaults
@@ -85,7 +85,7 @@ def fetch_configs(spreadsheet_id: Optional[str] = None) -> list[BatchConfig]:
     language = settings.get("LANGUAGE", "en").lower()
     voice = settings.get("VOICE", "")
     title = settings.get("TITLE", f"Batch {batch_num}")
-    status = settings.get("STATUS", "")
+    status = settings.get("GENERATION_SWITCH", settings.get("STATUS", ""))
     video_url = settings.get("VIDEO_URL", "")
     row_index = status_row_index or 1  # used by mark_batch_done
     config = BatchConfig(
@@ -194,6 +194,19 @@ def mark_batch_done(batch_config: BatchConfig, video_url: str, spreadsheet_id: O
     ).execute()
 
     logger.info(f"Batch {batch_config.batch} marked DONE in sheet row {row}")
+
+
+def set_config_status(row_index: int, status_text: str, spreadsheet_id: Optional[str] = None):
+    """Write arbitrary status text back to the STATUS dropdown cell (Column B) in the CONFIG tab."""
+    sid = spreadsheet_id or SPREADSHEET_ID
+    service = get_sheets_service()
+
+    service.spreadsheets().values().update(
+        spreadsheetId=sid,
+        range=f"{CONFIG_TAB}!B{row_index}",
+        valueInputOption="RAW",
+        body={"values": [[status_text]]},
+    ).execute()
 
 
 def append_result_row(values: list[str], spreadsheet_id: Optional[str] = None) -> None:
