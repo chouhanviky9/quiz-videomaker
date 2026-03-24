@@ -37,6 +37,10 @@ class BatchConfig:
     status: str          # empty = pending, "DONE" = already processed
     video_url: str       # filled after upload
     row_index: int       # 0-based index in the sheet (for writing STATUS back)
+    color_header_red: Optional[str] = None
+    color_header_red_dark: Optional[str] = None
+    color_bg_blue: Optional[str] = None
+    color_white: Optional[str] = None
 
 
 @dataclass
@@ -117,6 +121,10 @@ def fetch_configs(spreadsheet_id: Optional[str] = None) -> list[BatchConfig]:
         status=status,
         video_url=video_url,
         row_index=row_index,
+        color_header_red=settings.get("COLOR_HEADER_RED"),
+        color_header_red_dark=settings.get("COLOR_HEADER_RED_DARK"),
+        color_bg_blue=settings.get("COLOR_BG_BLUE"),
+        color_white=settings.get("COLOR_WHITE"),
     )
     return [config]
 

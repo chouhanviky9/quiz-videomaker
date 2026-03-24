@@ -87,6 +87,21 @@ class Config:
 
     def set(self, key, value):
         old_value = self._data.get(key)
+        
+        # Convert hex string to RGB/RGBA tuple
+        if isinstance(value, str):
+            val_stripped = value.strip()
+            if val_stripped.startswith("#"):
+                h = val_stripped.lstrip("#")
+                if len(h) in (6, 8):
+                    try:
+                        if len(h) == 6:
+                            value = tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
+                        else:
+                            value = tuple(int(h[i:i+2], 16) for i in (0, 2, 4, 6))
+                    except ValueError:
+                        pass
+                        
         self._data[key] = value
         
         # Only notify hooks if the value actually changed
