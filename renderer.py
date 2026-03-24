@@ -255,20 +255,13 @@ def _get_badge_layer(text: str, is_logo: bool = False) -> Image.Image:
     if is_logo:
         try:
             logo_img = None
-            # 1) Try loading from config URL (set via Google Sheet)
-            logo_url = config.get("VIDEO_TOPRIGHT_LOGO", "")
-            if logo_url:
-                logo_img = _load_logo_from_url(logo_url)
-
-            # 2) Fallback to local file
-            if logo_img is None:
-                logo_path = Path("assets/logos/video-maker-logo.png")
-                if logo_path.exists():
-                    logo_img = Image.open(logo_path).convert("RGBA")
-
-            if logo_img is not None:
+            logo_path_str = config.get("CURRENT_TOPRIGHT_LOGO", "assets/logos/video-maker-logo.png")
+            logo_path = Path(logo_path_str)
+            if logo_path.exists():
+                logo_img = Image.open(logo_path).convert("RGBA")
                 size = (NUMBER_BADGE_RADIUS + 5) * 2
                 logo_img.thumbnail((size, size))
+                _badge_cache["Logo"] = logo_img
                 return logo_img
         except Exception as e:
             logger.warning(f"Could not load logo in renderer: {e}")

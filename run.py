@@ -95,9 +95,9 @@ def main():
             if configs:
                 batch_config = configs[0]
                 # Check the dropdown switch
-                # if str(batch_config.status).strip().lower() != "start":
-                #     time.sleep(5)
-                #     continue
+                if str(batch_config.status).strip().lower() != "start":
+                    time.sleep(5)
+                    continue
 
                 logger.info("Detected 'Start'! Changing status to 'Processing'...")
                 from sheets import set_config_status
@@ -117,10 +117,38 @@ def main():
                     bg_music_idx = str(config.get("BG_MUSIC", "1"))
                     selected_music_path = f"assets/sound/quizSong{bg_music_idx}.mp3"
 
+                    import urllib.request
+                    from pathlib import Path
+                    import shutil
+
+                    def resolve_logo(key: str, default: str, dl_name: str) -> str:
+                        val = str(config.get(key, "")).strip()
+                        if not val:
+                            return default
+                        if val.startswith("http://") or val.startswith("https://"):
+                            try:
+                                d_path = f"config/temp/{dl_name}"
+                                Path("config/temp").mkdir(parents=True, exist_ok=True)
+                                req = urllib.request.Request(val, headers={'User-Agent': 'Mozilla/5.0'})
+                                with urllib.request.urlopen(req) as res, open(d_path, 'wb') as out_f:
+                                    shutil.copyfileobj(res, out_f)
+                                return d_path
+                            except Exception as e:
+                                logger.warning(f"Failed download {key}: {e}")
+                                return default
+                        if Path(val).exists(): return val
+                        return default
+
+                    default_logo = "assets/logos/video-maker-logo.png"
+                    outrow_logo = resolve_logo("VIDEO_OUTROW_LOGO", default_logo, "outrow_logo.png")
+                    topright_logo = resolve_logo("VIDEO_TOPRIGHT_LOGO", default_logo, "topright_logo.png")
+                    
+                    config.set("CURRENT_TOPRIGHT_LOGO", topright_logo)
+
                     video_url = process_batch_of_questions(
                         batch_config=batch_config,
                         questions=questions,
-                        logo_path="assets/logos/video-maker-logo.png",
+                        logo_path=outrow_logo,
                         bg_music_path=selected_music_path,
                         upload=True,
                         batch_number=batch_config.batch,
