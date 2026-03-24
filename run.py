@@ -43,7 +43,7 @@ def process_batch_of_questions(
     logger.info(f"── Batch {batch_number}: processing {len(questions)} question(s) ──")
 
     # Generate TTS audio
-    logger.info("─── Phase 1: Generating TTS audio ───")
+    logger.info(f"─── Phase 1: Generating TTS audio (Language: {batch_config.language.upper()}) ───")
     audio_paths = generate_batch_audio(
         questions=questions,
         language=batch_config.language,

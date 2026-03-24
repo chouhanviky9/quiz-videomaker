@@ -77,12 +77,32 @@ def fetch_configs(spreadsheet_id: Optional[str] = None) -> list[BatchConfig]:
         value = row[1].strip() if len(row) > 1 else ""
         settings[key.upper()] = value
         if key.upper() in ("STATUS", "GENERATION_SWITCH"):
-            # CONFIG_RANGE starts at row 1 → sheet row = i + 1
-            status_row_index = i + 1
+            # CONFIG_RANGE starts at row 2 (`A2:F`) → sheet row = i + 2
+            status_row_index = i + 2
     # Extract fields with defaults
     batch_num = int(settings.get("BATCH", "1"))
     batch_size = int(settings.get("BATCH_SIZE", "2"))
-    language = settings.get("LANGUAGE", "en").lower()
+    
+    # Map full language names to codes
+    LANGUAGE_MAP = {
+        'arabic': 'ar', 'filipino': 'fil', 'bangla': 'bn', 'finnish': 'fi', 'dutch': 'nl', 'galician': 'gl', 
+        'english': 'en', 'georgian': 'ka', 'french': 'fr', 'greek': 'el', 'german': 'de', 'gujarati': 'gu', 
+        'hindi': 'hi', 'haitian creole': 'ht', 'indonesian': 'id', 'hebrew': 'he', 'italian': 'it', 
+        'hungarian': 'hu', 'japanese': 'ja', 'icelandic': 'is', 'korean': 'ko', 'javanese': 'jv', 
+        'marathi': 'mr', 'kannada': 'kn', 'polish': 'pl', 'konkani': 'kok', 'portuguese': 'pt', 
+        'lao': 'lo', 'romanian': 'ro', 'latin': 'la', 'russian': 'ru', 'latvian': 'lv', 'spanish': 'es', 
+        'lithuanian': 'lt', 'tamil': 'ta', 'luxembourgish': 'lb', 'telugu': 'te', 'macedonian': 'mk', 
+        'thai': 'th', 'maithili': 'mai', 'turkish': 'tr', 'malagasy': 'mg', 'ukrainian': 'uk', 
+        'malay': 'ms', 'vietnamese': 'vi', 'malayalam': 'ml', 'afrikaans': 'af', 'mongolian': 'mn', 
+        'albanian': 'sq', 'nepali': 'ne', 'amharic': 'am', 'norwegian, bokmål': 'nb', 'armenian': 'hy', 
+        'norwegian, nynorsk': 'nn', 'azerbaijani': 'az', 'odia': 'or', 'basque': 'eu', 'pashto': 'ps', 
+        'belarusian': 'be', 'persian': 'fa', 'bulgarian': 'bg', 'punjabi': 'pa', 'burmese': 'my', 
+        'serbian': 'sr', 'catalan': 'ca', 'sindhi': 'sd', 'cebuano': 'ceb', 'sinhala': 'si', 
+        'chinese, mandarin': 'cmn', 'slovak': 'sk', 'croatian': 'hr', 'slovenian': 'sl', 'czech': 'cs', 
+        'swahili': 'sw', 'danish': 'da', 'swedish': 'sv', 'estonian': 'et', 'urdu': 'ur'
+    }
+    raw_lang = settings.get("LANGUAGE", "en").lower().strip()
+    language = LANGUAGE_MAP.get(raw_lang, raw_lang)
     voice = settings.get("VOICE", "")
     title = settings.get("TITLE", f"Batch {batch_num}")
     status = settings.get("GENERATION_SWITCH", settings.get("STATUS", ""))
