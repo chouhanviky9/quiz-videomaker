@@ -55,10 +55,10 @@ def _build_prompt(question: Question, language: str) -> str:
     # Include options so the voice reads them out
     full_text = (
         f"{question.text}\n"
-        f"A: {question.option_a}\n"
-        f"B: {question.option_b}\n"
-        f"C: {question.option_c}\n"
-        f"D: {question.option_d}"
+        # f"A: {question.option_a}\n"
+        # f"B: {question.option_b}\n"
+        # f"C: {question.option_c}\n"
+        # f"D: {question.option_d}"
     )
     return template.format(text=full_text)
 

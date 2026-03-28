@@ -185,7 +185,7 @@ def _text_center(
     th = font.getbbox("A")[3] - font.getbbox("A")[1] 
     
     tx = x1 + (x2 - x1 - tw) // 2
-    ty = y1 + (y2 - y1 - th) // 2 - 5 # slight 5px adjustment for montserrat baseline
+    ty = y1 + (y2 - y1 - th) // 2 
     # 3D embossed shadow
     if shadow_offset > 0:
         draw.text((tx + shadow_offset, ty + shadow_offset), text, font=font, fill=shadow_color)
@@ -293,7 +293,8 @@ def _get_badge_layer(text: str, is_logo: bool = False) -> Image.Image:
     #     outline=config.get("COLOR_BLACK"),
     #     width=s(5)
     # )
-    num_font = _load_font(config.get("FONT_EXTRABOLD"), s(36))
+    # num_font = _load_font(config.get("FONT_EXTRABOLD"), s(36))
+    num_font = _load_font("assets/fonts/Atma-Bold.ttf", s(44))
     _text_center(draw, text, num_font, (cx - s(25), cy - s(24), cx + s(25), cy + s(16)), config.get("COLOR_WHITE"),
                  shadow_offset=s(2), shadow_color=(0, 0, 0))
 
@@ -463,7 +464,7 @@ def _get_option_card_layer(letter: str, text: str, card_state: str = "normal") -
         border_w = s(4)
 
     opt_font = _load_font(config.get("FONT_BOLD"), s(42))
-    badge_font = _load_font(config.get("FONT_EXTRABOLD"), s(36))
+    badge_font = _load_font("assets/fonts/Atma-Bold.ttf", s(40))
 
     # ── Dark bottom shadow for raised 3D depth ──
     shadow_offset = s(6)
@@ -801,8 +802,8 @@ def build_question_clip(
         clock_tick = _get_clock_tick_audio()
         if clock_tick is not None:
             import moviepy as mp
-            for sec in range(int(countdown_dur)-1):
-                volume = 0.05 + (0.05 * sec)
+            for sec in range(3,int(countdown_dur)-1):
+                volume = 0.05 + (0.04 * sec)
                 tick_at_sec = clock_tick.with_start(sec)
                 tick_at_sec = tick_at_sec.with_effects([mp.afx.MultiplyVolume(volume)])
                 audio_clips.append(tick_at_sec)
