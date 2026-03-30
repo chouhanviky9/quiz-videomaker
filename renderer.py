@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from moviepy import (
     AudioFileClip,
     VideoClip,
@@ -79,24 +79,26 @@ def clear_render_caches():
     _qtext_cache.clear()
     _option_card_cache.clear()
     _static_layer_cache.clear()
+    _header_layer_cache.clear()
     _timer_mask_cache.clear()
     _timer_pattern_cache.clear()
 
 # ── Layout constants ─────────────────────────────────────────────────────────
-HEADER_HEIGHT = 280
+HEADER_HEIGHT = 380
 HEADER_Y = 0
-OPTIONS_Y = 435
+OPTIONS_Y = 475
 OPTION_W = 850
 OPTION_H = 150
 OPTION_GAP_X = 40
-OPTION_GAP_Y = 30
+OPTION_GAP_Y = 40
 OPTION_GRID_LEFT = (VIDEO_WIDTH - (2 * OPTION_W + OPTION_GAP_X)) // 2
 TIMER_Y = 920
-TIMER_H = 65
+TIMER_H = 80
 TIMER_W = 1104
 TIMER_X = (VIDEO_WIDTH - TIMER_W) // 2
-TIMER_RADIUS = 25
-BADGE_RADIUS = 45
+TIMER_RADIUS = 40
+TIMER_PAD = 9  # Thickness of the white border around the green timer
+BADGE_RADIUS = 55
 NUMBER_BADGE_RADIUS = 38
 
 
@@ -179,13 +181,18 @@ def _text_center(
 ) -> None:
     """Draw text centered within a bounding box with optional 3D embossed shadow."""
     x1, y1, x2, y2 = area
+    cx = x1 + (x2 - x1) / 2
+    cy = y1 + (y2 - y1) / 2
+    
+    # Get exact bounding box of the rendered text pixels
     bbox = draw.textbbox((0, 0), text, font=font)
     tw = bbox[2] - bbox[0]
-    # Use exact font height based on metrics instead of bbox offset to ensure perfect vertical center
-    th = font.getbbox("A")[3] - font.getbbox("A")[1] 
+    th = bbox[3] - bbox[1]
     
-    tx = x1 + (x2 - x1 - tw) // 2
-    ty = y1 + (y2 - y1 - th) // 2 
+    # Calculate top-left drawing coordinate neutralizing internal font offsets
+    tx = cx - tw / 2 - bbox[0]
+    ty = cy - th / 2 - bbox[1]
+    
     # 3D embossed shadow
     if shadow_offset > 0:
         draw.text((tx + shadow_offset, ty + shadow_offset), text, font=font, fill=shadow_color)
@@ -239,11 +246,11 @@ def _get_background_layer() -> tuple:
     # Thick white divider line
     draw.rectangle([0, s(HEADER_HEIGHT), s(VIDEO_WIDTH), s(HEADER_HEIGHT + 8)], fill=config.get("COLOR_WHITE"))
     # Dark bottom shadow under header for 3D raised effect
-    shadow_dark = config.get("COLOR_SHADOW_DARK")
-    draw.rectangle([0, s(HEADER_HEIGHT + 8), s(VIDEO_WIDTH), s(HEADER_HEIGHT + 20)], fill=shadow_dark)
+    # shadow_dark = config.get("COLOR_SHADOW_DARK")
+    # draw.rectangle([0, s(HEADER_HEIGHT + 8), s(VIDEO_WIDTH), s(HEADER_HEIGHT + 20)], fill=shadow_dark)
     # Softer shadow fade
-    shadow_mid = (shadow_dark[0], shadow_dark[1], shadow_dark[2] + 30)
-    draw.rectangle([0, s(HEADER_HEIGHT + 20), s(VIDEO_WIDTH), s(HEADER_HEIGHT + 28)], fill=shadow_mid)
+    # shadow_mid = (shadow_dark[0], shadow_dark[1], shadow_dark[2] + 30)
+    # draw.rectangle([0, s(HEADER_HEIGHT + 20), s(VIDEO_WIDTH), s(HEADER_HEIGHT + 28)], fill=shadow_mid)
 
     # Downscale for smooth anti-aliased output
     final_img = img.resize((VIDEO_WIDTH, VIDEO_HEIGHT), Image.Resampling.LANCZOS)
@@ -280,23 +287,35 @@ def _get_badge_layer(text: str, is_logo: bool = False) -> Image.Image:
     draw = ImageDraw.Draw(img)
     cx, cy = size // 2, size // 2
 
-    # Dark bottom shadow for raised 3D effect
-    shadow_offset = s(2)
-    _draw_circle(draw, (cx, cy + shadow_offset), s(NUMBER_BADGE_RADIUS + 6), (10, 10, 40, 160))
-    # White outer ring
-    _draw_circle(draw, (cx, cy), s(NUMBER_BADGE_RADIUS + 5), config.get("COLOR_WHITE"))
+    # Dark bottom shadow for raised 3D effect of the whole badge
+    shadow_offset = s(4)
+    # _draw_circle(draw, (cx, cy + shadow_offset), s(NUMBER_BADGE_RADIUS + 12), (0, 0, 0, 120))
+    
+    # White outer ring (thicker border)
+    _draw_circle(draw, (cx, cy), s(NUMBER_BADGE_RADIUS + 8), config.get("COLOR_WHITE"))
+    
+    # Inner dark shadow to simulate an indented fill
+    inner_shadow_offset = s(3)
+    # _draw_circle(draw, (cx, cy + inner_shadow_offset), s(NUMBER_BADGE_RADIUS), (0, 0, 0, 110))
+
     # Inner fill
     _draw_circle(draw, (cx, cy), s(NUMBER_BADGE_RADIUS), config.get("COLOR_NUMBER_BADGE_BG"))
-    # Thick dark border
-    # draw.ellipse(
-    #     [cx - s(NUMBER_BADGE_RADIUS + 5), cy - s(NUMBER_BADGE_RADIUS + 5), cx + s(NUMBER_BADGE_RADIUS + 5), cy + s(NUMBER_BADGE_RADIUS + 5)],
-    #     outline=config.get("COLOR_BLACK"),
-    #     width=s(5)
-    # )
-    # num_font = _load_font(config.get("FONT_EXTRABOLD"), s(36))
-    num_font = _load_font("assets/fonts/Atma-Bold.ttf", s(44))
-    _text_center(draw, text, num_font, (cx - s(25), cy - s(24), cx + s(25), cy + s(16)), config.get("COLOR_WHITE"),
-                 shadow_offset=s(2), shadow_color=(0, 0, 0))
+    
+    # Centered text with deep shadow
+    num_font = _load_font("assets/fonts/Atma-Bold.ttf", s(48))
+    
+    # Easily edit this to visually bump the number UP (postive) or DOWN (negative) in pixels
+    manual_y_offset = s(2) 
+    
+    text_box = (
+        cx - s(NUMBER_BADGE_RADIUS), 
+        cy - s(NUMBER_BADGE_RADIUS) - manual_y_offset, 
+        cx + s(NUMBER_BADGE_RADIUS), 
+        cy + s(NUMBER_BADGE_RADIUS) - manual_y_offset
+    )
+    
+    _text_center(draw, text, num_font, text_box, config.get("COLOR_WHITE"),
+                 shadow_offset=s(4), shadow_color=(0, 0, 0, 230))
 
     final_img = img.resize((size // 2, size // 2), Image.Resampling.LANCZOS)
     _badge_cache[text] = final_img
@@ -315,8 +334,8 @@ def _get_question_text_layer(question: Question) -> Image.Image:
     img = Image.new("RGBA", (s(VIDEO_WIDTH), s(HEADER_HEIGHT)), (0,0,0,0))
     draw = ImageDraw.Draw(img)
 
-    max_font_size = 56
-    min_font_size = 20
+    max_font_size = 76
+    min_font_size = 60
     font_size = max_font_size
     max_w = s(VIDEO_WIDTH - 200)
     max_h = s(HEADER_HEIGHT - 60) # leave some padding top and bottom
@@ -324,7 +343,7 @@ def _get_question_text_layer(question: Question) -> Image.Image:
     while font_size >= min_font_size:
         q_font = _load_font(config.get("FONT_EXTRABOLD"), s(font_size))
         wrapped = _wrap_text(question.text.upper(), q_font, max_w)
-        bbox = draw.textbbox((0, 0), wrapped, font=q_font)
+        bbox = draw.textbbox((0, 0), wrapped, font=q_font, align="center")
         tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
         
         if th <= max_h:
@@ -333,11 +352,25 @@ def _get_question_text_layer(question: Question) -> Image.Image:
 
     # Draw centered in the header with 3D embossed shadow
     tx = (s(VIDEO_WIDTH) - tw) // 2
-    ty = s(30) + (s(HEADER_HEIGHT - 30) - th) // 2
-    # Dark shadow offset for 3D emboss
-    shadow_off = s(3)
-    draw.text((tx + shadow_off, ty + shadow_off), wrapped, font=q_font, fill=(0, 0, 0))
-    draw.text((tx, ty), wrapped, font=q_font, fill=config.get("COLOR_WHITE"))
+    # ty = s(30) + (s(HEADER_HEIGHT - 30) - th) // 2
+    # ty = (s(HEADER_HEIGHT) - th) // 2
+    ty = (s(HEADER_HEIGHT) - th) // 2 - s(25)
+
+    # Create a heavy blurred drop shadow
+    shadow_layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    shadow_draw = ImageDraw.Draw(shadow_layer)
+    shadow_y_offset = s(6)  # push shadow slightly down
+    
+    # Draw black text onto the empty layer
+    shadow_draw.text((tx, ty + shadow_y_offset), wrapped, font=q_font, fill=(0, 0, 0, 255), align="center")
+    # Apply strong Gaussian blur
+    shadow_layer = shadow_layer.filter(ImageFilter.GaussianBlur(radius=s(4)))
+    
+    # Composite the heavy blurred shadow onto our main image
+    img.alpha_composite(shadow_layer)
+    
+    # Finally, draw crisp white text on top
+    draw.text((tx, ty), wrapped, font=q_font, fill=config.get("COLOR_WHITE"), align="center")
 
     final_img = img.resize((VIDEO_WIDTH, HEADER_HEIGHT), Image.Resampling.LANCZOS)
     _qtext_cache[question.row_index] = final_img
@@ -391,31 +424,37 @@ def _get_timer_pattern(progress: float) -> Image.Image:
     if cache_key in _timer_pattern_cache:
         return _timer_pattern_cache[cache_key]
         
-    pad = 6
+    pad = TIMER_PAD
     inner_w = TIMER_W - 2 * pad
     inner_h = TIMER_H - 2 * pad
     
     # Base pattern (RGBA to easily composite highlights)
     pattern = Image.new("RGBA", (inner_w, inner_h), base_color)
-    draw = ImageDraw.Draw(pattern)
-    stripe_w = 25
-    # Draw diagonal stripes (\ shape from top-left to bottom-right)
+    
+    # Draw diagonal stripes into a separate layer to blur them for a soft modern look
+    stripe_layer = Image.new("RGBA", (inner_w, inner_h), (0, 0, 0, 0))
+    stripe_draw = ImageDraw.Draw(stripe_layer)
+    stripe_w = 40  # wider, less dense stripes
     for x in range(-inner_h * 2, inner_w, stripe_w * 2):
         pts = [
-            (x, 0),
-            (x + stripe_w, 0),
-            (x + stripe_w + inner_h, inner_h),
-            (x + inner_h, inner_h)
+            (x, inner_h),
+            (x + stripe_w, inner_h),
+            (x + stripe_w + inner_h, 0),
+            (x + inner_h, 0)
         ]
-        draw.polygon(pts, fill=stripe_color)
+        stripe_draw.polygon(pts, fill=stripe_color)
         
-    # Overlay for a glossy pill effect
+    # Slight antialiasing/softness
+    stripe_layer = stripe_layer.filter(ImageFilter.GaussianBlur(radius=1))
+    pattern.alpha_composite(stripe_layer)
+        
+    # Overlay for a soft, subtle glossy pill effect
     overlay = Image.new("RGBA", (inner_w, inner_h), (0, 0, 0, 0))
     overlay_draw = ImageDraw.Draw(overlay)
     # Highlight top
-    overlay_draw.rectangle([0, 0, inner_w, inner_h // 2], fill=(255, 255, 255, 50))
+    overlay_draw.rectangle([0, 0, inner_w, inner_h // 2], fill=(255, 255, 255, 25))
     # Shadow bottom
-    overlay_draw.rectangle([0, inner_h - inner_h // 3, inner_w, inner_h], fill=(0, 0, 0, 30))
+    overlay_draw.rectangle([0, inner_h - inner_h // 3, inner_w, inner_h], fill=(0, 0, 0, 15))
     
     pattern = Image.alpha_composite(pattern, overlay)
     
@@ -449,7 +488,7 @@ def _get_option_card_layer(letter: str, text: str, card_state: str = "normal") -
     
     if card_state == "correct":
         card_fill = config.get("COLOR_CORRECT_GREEN")
-        text_color = config.get("COLOR_WHITE")
+        text_color = (28,30,57)
         outline = config.get("COLOR_BLACK")
         border_w = s(4)
     elif card_state == "wrong":
@@ -463,11 +502,11 @@ def _get_option_card_layer(letter: str, text: str, card_state: str = "normal") -
         outline = config.get("COLOR_BLACK")
         border_w = s(4)
 
-    opt_font = _load_font(config.get("FONT_BOLD"), s(42))
-    badge_font = _load_font("assets/fonts/Atma-Bold.ttf", s(40))
+    opt_font = _load_font(config.get("FONT_BOLD"), s(70))
+    badge_font = _load_font("assets/fonts/Atma-Bold.ttf", s(70))
 
     # ── Dark bottom shadow for raised 3D depth ──
-    shadow_offset = s(6)
+    shadow_offset = s(2)
     shadow_color = (10, 10, 40, 140)
     _draw_rounded_rect(draw, (ox + s(2), oy + shadow_offset, ox + s(OPTION_W) + s(2), oy + s(OPTION_H) + shadow_offset),
                        radius=pill_radius, fill=shadow_color)
@@ -477,19 +516,14 @@ def _get_option_card_layer(letter: str, text: str, card_state: str = "normal") -
                        radius=pill_radius, fill=card_fill, outline=outline, width=border_w)
 
     # ── Badge circle with gradient ──
-    badge_cx = ox + s(65)
+    badge_cx = ox + s(75)  # Moved 10px right
     badge_cy = oy + s(OPTION_H) // 2
     
     if card_state != "normal":
-        _draw_circle(draw, (badge_cx, badge_cy), s(BADGE_RADIUS + 3), config.get("COLOR_BLACK"))
+        _draw_circle(draw, (badge_cx, badge_cy), s(BADGE_RADIUS + 4), config.get("COLOR_BLACK"))
     else:
-        _draw_circle(draw, (badge_cx, badge_cy), s(BADGE_RADIUS + 8), config.get("COLOR_WHITE"))
-        draw.ellipse(
-            [badge_cx - s(BADGE_RADIUS + 8), badge_cy - s(BADGE_RADIUS + 8), badge_cx + s(BADGE_RADIUS + 8), badge_cy + s(BADGE_RADIUS + 8)],
-            fill=None,
-            outline=config.get("COLOR_BLACK"),
-            width=s(4)
-        )
+        # Thin black outline around the gradient
+        _draw_circle(draw, (badge_cx, badge_cy), s(BADGE_RADIUS + 3), config.get("COLOR_BLACK"))
 
     # Red-orange gradient fill for badge circle
     grad_top = config.get("COLOR_BADGE_GRADIENT_TOP")
@@ -497,33 +531,38 @@ def _get_option_card_layer(letter: str, text: str, card_state: str = "normal") -
     _draw_gradient_circle(img_2x, (badge_cx, badge_cy), s(BADGE_RADIUS), grad_top, grad_bottom)
     # Re-acquire draw after pasting gradient
     draw = ImageDraw.Draw(img_2x)
-    # Thick dark border on badge
-    draw.ellipse(
-        [badge_cx - s(BADGE_RADIUS), badge_cy - s(BADGE_RADIUS), badge_cx + s(BADGE_RADIUS), badge_cy + s(BADGE_RADIUS)],
-        fill=None, outline=config.get("COLOR_BLACK"), width=s(3)
+    
+    # Perfectly center the letter
+    badge_box = (
+        badge_cx - s(BADGE_RADIUS), 
+        badge_cy - s(BADGE_RADIUS), 
+        badge_cx + s(BADGE_RADIUS), 
+        badge_cy + s(BADGE_RADIUS)
     )
-    _text_center(draw, letter, badge_font, (badge_cx - s(20), badge_cy - s(22), badge_cx + s(20), badge_cy + s(14)), config.get("COLOR_WHITE"),
-                 shadow_offset=s(2), shadow_color=(0, 0, 0))
+    # Give the letter a soft shadow
+    shadow_color = (255, 255, 255, 150) if card_state == "normal" else (0, 0, 0, 150)
+    _text_center(draw, letter, badge_font, badge_box, config.get("COLOR_WHITE"),
+                 shadow_offset=s(2), shadow_color=shadow_color)
 
-    text_area_left = ox + s(140)
+    text_area_left = ox + s(150)  # Moved 10px right to maintain gap from badge
     text_area_right = ox + s(OPTION_W - 20)
-    text_shadow = s(2)
+    text_shadow = 0
     _text_center(draw, text.upper(), opt_font, (text_area_left, oy, text_area_right, oy + s(OPTION_H)), text_color,
-                 shadow_offset=text_shadow, shadow_color=(0, 0, 0, 60) if card_state == "normal" else (0, 0, 0))
+                 shadow_offset=text_shadow, shadow_color=(0, 0, 0, 0))
 
     card_1x = img_2x.resize((OPTION_W + margin*2, OPTION_H + margin*2), Image.Resampling.LANCZOS)
     _option_card_cache[key] = card_1x
     return card_1x
 
 
-# ── Cached static layer per question (badges + text + options at final position) ──
+# ── Static layers (cached for performance) ──
+_header_layer_cache: dict[int, Image.Image] = {}
 _static_layer_cache: dict[int, Image.Image] = {}
 
-def _get_static_question_layer(question: Question) -> Image.Image:
-    """Build and cache the RGBA overlay with badges, question text, and option cards
-    at their final (post-intro) positions. This avoids re-compositing ~270+ frames."""
-    if question.row_index in _static_layer_cache:
-        return _static_layer_cache[question.row_index]
+def _get_static_header_layer(question: Question) -> Image.Image:
+    """Build and cache the RGBA overlay with ONLY badges and question text."""
+    if question.row_index in _header_layer_cache:
+        return _header_layer_cache[question.row_index]
 
     img = Image.new("RGBA", (VIDEO_WIDTH, VIDEO_HEIGHT), (0, 0, 0, 0))
 
@@ -532,7 +571,7 @@ def _get_static_question_layer(question: Question) -> Image.Image:
     logo = _get_badge_layer("Logo", is_logo=True)
 
     badge_w, badge_h = qnum.size
-    qx = 60 - badge_w // 2
+    qx = 75 - badge_w // 2
     qy = 60 - badge_h // 2
     img.paste(qnum, (qx, qy), mask=qnum)
 
@@ -544,6 +583,17 @@ def _get_static_question_layer(question: Question) -> Image.Image:
     # Question text
     qtext = _get_question_text_layer(question)
     img.paste(qtext, (0, 0), mask=qtext)
+
+    _header_layer_cache[question.row_index] = img
+    return img
+
+def _get_static_question_layer(question: Question) -> Image.Image:
+    """Build and cache the full static overlay (header + all 4 option cards)."""
+    if question.row_index in _static_layer_cache:
+        return _static_layer_cache[question.row_index]
+
+    # Start with the header
+    img = _get_static_header_layer(question).copy()
 
     # Option cards at final positions
     margin = 16
@@ -572,24 +622,14 @@ _timer_mask_cache: dict[int, Image.Image] = {}
 
 def _draw_timer_bar(draw: ImageDraw.ImageDraw, img: Image.Image, timer_y: int, timer_progress: float) -> None:
     """Draw the timer bar at the given Y position with the given progress."""
-    # Dark bottom shadow for 3D raised timer
-    shadow_offset = 5
-    _draw_rounded_rect(
-        draw,
-        (TIMER_X + 2, timer_y + shadow_offset, TIMER_X + TIMER_W + 2, timer_y + TIMER_H + shadow_offset),
-        radius=TIMER_RADIUS,
-        fill=(10, 10, 40),
-    )
-    # White track with thick dark border
+    # Flat white track (no thick black border)
     _draw_rounded_rect(
         draw,
         (TIMER_X, timer_y, TIMER_X + TIMER_W, timer_y + TIMER_H),
         radius=TIMER_RADIUS,
         fill=config.get("COLOR_WHITE"),
-        outline=config.get("COLOR_BLACK"),
-        width=3,
     )
-    pad = 6
+    pad = TIMER_PAD
     fill_w = int((TIMER_W - 2 * pad) * max(0.0, min(1.0, timer_progress)))
 
     if fill_w > (TIMER_RADIUS - pad) * 2:
@@ -642,7 +682,7 @@ def render_question_frame(
         qnum = _get_badge_layer(str(question.row_index))
         logo = _get_badge_layer("Logo", is_logo=True)
         badge_w, badge_h = qnum.size
-        tgt_qx = 60 - badge_w // 2
+        tgt_qx = 75 - badge_w // 2
         qx = int(-badge_w + (tgt_qx + badge_w) * intro_progress)
         qy = 60 - badge_h // 2
         img.paste(qnum, (qx, qy), mask=qnum)
@@ -674,35 +714,38 @@ def render_question_frame(
 
         return np.array(img)
 
-    # ── After intro: use cached static layer (badges + question + options) ──
-    static = _get_static_question_layer(question)
-    img.paste(static, (0, 0), mask=static)
-
     if state == "options":
+        static = _get_static_question_layer(question)
+        img.paste(static, (0, 0), mask=static)
         _draw_timer_bar(draw, img, TIMER_Y, timer_progress)
 
     elif state in ("reveal", "empty"):
-        # Reveal animation: scale up correct option
-        for (letter, text), (tgt_x, tgt_y) in zip(options, positions):
-            is_correct = (letter == question.letter)
-            card_state = "correct" if is_correct else "wrong"
-            card = _get_option_card_layer(letter, text, card_state)
+        # Header only (no options)
+        header = _get_static_header_layer(question)
+        img.paste(header, (0, 0), mask=header)
 
-            if is_correct:
+        # Re-center correct answer in the blue block
+        # Vertical center of blue area = (HEADER_HEIGHT + VIDEO_HEIGHT) // 2
+        blue_center_y = (HEADER_HEIGHT + VIDEO_HEIGHT) // 2
+        card_x = (VIDEO_WIDTH - OPTION_W) // 2
+        card_y = blue_center_y - OPTION_H // 2
+
+        for (letter, text), (tgt_x, tgt_y) in zip(options, positions):
+            if letter == question.letter:
+                card = _get_option_card_layer(letter, text, "correct")
+                
+                # Reveal animation: scale up correct option slightly
                 scale = 1.0 + 0.05 * reveal_progress
                 card_w, card_h = card.size
                 scaled_w, scaled_h = int(card_w * scale), int(card_h * scale)
                 scaled_card = card.resize((scaled_w, scaled_h), Image.Resampling.BILINEAR)
 
-                cx = tgt_x - margin + card_w // 2
-                cy = tgt_y - margin + card_h // 2
-                px = cx - scaled_w // 2
-                py = cy - scaled_h // 2
+                px = card_x - margin + (card_w - scaled_w) // 2
+                py = card_y - margin + (card_h - scaled_h) // 2
 
                 img.paste(scaled_card, (px, py), mask=scaled_card)
-            else:
-                img.paste(card, (tgt_x - margin, tgt_y - margin), mask=card)
-
+                break
+    
     return np.array(img)
 
 # ── Clip builders ────────────────────────────────────────────────────────────
@@ -716,7 +759,7 @@ def _get_clock_tick_audio() -> AudioFileClip | None:
     if not _clock_tick_loaded:
         _clock_tick_loaded = True
         try:
-            music_path = Path(__file__).resolve().parent / "assets" / "sound" / "clock-tick-second.mp3"
+            music_path = Path(__file__).resolve().parent / "assets" / "sound" / "clock-tick-second2.mp3"
             if music_path.exists():
                 _clock_tick_cache[0] = AudioFileClip(str(music_path))
         except Exception as e:
@@ -802,11 +845,10 @@ def build_question_clip(
         clock_tick = _get_clock_tick_audio()
         if clock_tick is not None:
             import moviepy as mp
-            for sec in range(3,int(countdown_dur)-1):
-                volume = 0.05 + (0.04 * sec)
-                tick_at_sec = clock_tick.with_start(sec)
-                tick_at_sec = tick_at_sec.with_effects([mp.afx.MultiplyVolume(volume)])
-                audio_clips.append(tick_at_sec)
+            # Play the 3-second timer audio at the end of the countdown
+            start_at = max(0, countdown_dur - 3.0)
+            tick_at_sec = clock_tick.with_start(start_at).with_effects([mp.afx.MultiplyVolume(0.8)])
+            audio_clips.append(tick_at_sec)
     except Exception as e:
         logger.debug(f"clock-tick-second.mp3 not found or error — skipping: {e}")
 
@@ -818,9 +860,29 @@ def build_question_clip(
     except Exception:
         logger.debug("Correct SFX not found — skipping")
 
+    # Woosh SFX at the end of reveal to transition to the next scene
+    try:
+        woosh_path = Path(__file__).resolve().parent / "assets" / "sfx" / "woosh.mp3"
+        if woosh_path.exists():
+            # Play woosh 0.5 seconds before the clip ends
+            woosh_sfx = AudioFileClip(str(woosh_path)).with_start(max(0, video.duration - 0.5))
+            audio_clips.append(woosh_sfx)
+    except Exception as e:
+        logger.debug(f"woosh.mp3 not found or error — skipping: {e}")
+
     # Mix all audio
     if audio_clips:
         mixed_audio = CompositeAudioClip(audio_clips)
+        # Force the audio to the video's original duration to prevent extra black frames
+        mixed_audio = mixed_audio.with_duration(video.duration)
         video = video.with_audio(mixed_audio)
+
+    # ── Scene transition (fade out) ──
+    try:
+        import moviepy as mp
+        # Add a 0.3s fade to blue instead of black
+        video = video.with_effects([mp.vfx.FadeOut(0.3, color=(1, 65, 164))])
+    except Exception as e:
+        logger.debug(f"Could not apply FadeOut effect: {e}")
 
     return video

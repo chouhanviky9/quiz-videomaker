@@ -1,0 +1,48 @@
+# Setup and Run (Manual)
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+python run.py
+
+========================================
+# System Service Commands (quiz-video)
+========================================
+
+Start        :  sudo systemctl start quiz-video    
+                -> Starts the script in the background.
+
+Stop         :  sudo systemctl stop quiz-video     
+                -> Stops the script immediately.
+
+Restart      :  sudo systemctl restart quiz-video  
+                -> Stops and then starts the script (useful after code changes).
+
+Check Status :  sudo systemctl status quiz-video   
+                -> Shows if it’s running, stopped, or crashed.
+
+Auto-Boot    :  sudo systemctl enable quiz-video   
+                -> Ensures the script starts automatically if the VPS reboots.
+
+
+========================================
+# Monitoring & Logs
+========================================
+Because your output.log can get huge, use these commands to read it without opening the whole file.
+
+Quick check (See the last 50 lines):
+    tail -n 50 /root/quiz-videomaker/output.log
+
+Live view (Watch the log in real-time):
+    tail -f /root/quiz-videomaker/output.log
+    (Press Ctrl + C to exit the live view)
+
+Clear the log file (If it gets too big):
+    > /root/quiz-videomaker/output.log
+
+
+========================================
+# Troubleshooting
+========================================
+If the status says failed, run this to see the detailed system error:
+
+    journalctl -u quiz-video.service -n 50 --no-pager

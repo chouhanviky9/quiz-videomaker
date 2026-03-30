@@ -22,7 +22,7 @@ class Config:
             "COLOR_HEADER_RED": (225, 77, 77),
             "COLOR_HEADER_RED_DARK": (225, 77, 77),
             "COLOR_WHITE": (255, 255, 255),
-            "COLOR_OPTION_TEXT": (30, 58, 138),
+            "COLOR_OPTION_TEXT": (28, 30, 57),
             "COLOR_BADGE_ORANGE": (249, 115, 22),
             "COLOR_BADGE_RED": (220, 38, 38),
             "COLOR_BADGE_GRADIENT_TOP": (255, 130, 20),
@@ -99,9 +99,17 @@ class Config:
                 elif isinstance(old_value, float):
                     value = float(value)
                 elif isinstance(old_value, tuple):
-                    # Parse "(R, G, B)" or "R, G, B" strings into tuples
-                    cleaned = value.strip().strip("()")
-                    value = tuple(int(x.strip()) for x in cleaned.split(","))
+                    val_str = value.strip()
+                    if val_str.startswith("#"):
+                        h = val_str.lstrip("#")
+                        # Handle both #RGB and #RRGGBB formats just in case, though 6-char is standard
+                        if len(h) == 3:
+                            h = "".join([c*2 for c in h])
+                        value = (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+                    else:
+                        # Parse "(R, G, B)" or "R, G, B" strings into tuples
+                        cleaned = val_str.strip("()")
+                        value = tuple(int(x.strip()) for x in cleaned.split(","))
             except (ValueError, TypeError):
                 pass  # Keep as string if conversion fails
 

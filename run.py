@@ -145,14 +145,31 @@ def main():
                     
                     config.set("CURRENT_TOPRIGHT_LOGO", topright_logo)
 
+                    import os
+                    is_dev = os.getenv("MODE") == "DEV"
+                    
+                    if is_dev:
+                        logger.info("DEV MODE ENABLED: Rendering only the first question. Uploading and sheet updates are disabled.")
+                        questions = questions[:1]
+
                     video_url = process_batch_of_questions(
                         batch_config=batch_config,
                         questions=questions,
                         logo_path=outrow_logo,
                         bg_music_path=selected_music_path,
-                        upload=True,
+                        upload=not is_dev,
                         batch_number=batch_config.batch,
                     )
+                    
+                    if is_dev:
+                        local_path = video_url.replace("LOCAL: ", "")
+                        logger.info(f"Opening local test video: {local_path}")
+                        import subprocess
+                        subprocess.run(['open', local_path])
+                        
+                        logger.info("Resetting status to 'Stopped'...")
+                        set_config_status(batch_config.row_index, "Stopped", spreadsheet_id)
+                        continue
                     
                     logger.info("Writing results to RESULT tab...")
                     now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")

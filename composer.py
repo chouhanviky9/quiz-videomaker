@@ -187,6 +187,9 @@ def compose_video(
         """Render a single question clip to a temp MP4 file."""
         logger.info(f"Building clip for Q{idx + 1} ({idx + 1}/{len(questions)})")
         clip = build_question_clip(question, audio_path)
+        
+
+            
         tmp_path = temp_dir / f"q_{idx:03d}.mp4"
         clip.write_videofile(
             str(tmp_path),
@@ -262,6 +265,8 @@ def compose_video(
             logger.warning(f"Could not add background music: {e}")
 
     # ── Export ────────────────────────────────────────────────────────────
+
+
     if output_filename is None:
         import datetime
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
