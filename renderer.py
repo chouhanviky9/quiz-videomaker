@@ -794,123 +794,104 @@ def _get_clock_tick_audio() -> AudioFileClip | None:
             logger.warning(f"Could not load clock tick audio: {e}")
     return _clock_tick_cache[0]
 
-def _make_countdown_clip(question: Question) -> VideoClip:
+def generate_question_frames_bytes(question: Question, fps: int = 30):
     """
-    Build the 10-second countdown phase as a video clip.
-    Timer bar smoothly shrinks from full to empty.
+    Generator that yields raw RGB frame bytes for the full 13-second question.
+    Completely bypasses MoviePy/NumPy array allocation for extreme speed.
     """
-    INTRO_DURATION = config.get("INTRO_DURATION")
-    countdown_dur = config.get("COUNTDOWN_DURATION")
-    def make_frame(t):
-        progress = 1.0 - (t / countdown_dur)
-        if t <= INTRO_DURATION:
-            intro_p = 1.0 - (1.0 - (t / INTRO_DURATION))**3
-            return render_question_frame(question, timer_progress=progress, state="options", intro_progress=intro_p)
-        return render_question_frame(question, timer_progress=progress, state="options", intro_progress=1.0)
-
-    frames_clip = VideoClip(make_frame, duration=countdown_dur)
-    return frames_clip
-
-
-def _make_reveal_clip(question: Question) -> VideoClip:
-    """Build the 3-second answer reveal phase as a video clip."""
+    countdown_dur = config.get("COUNTDOWN_DURATION", 10.0)
+    reveal_dur = config.get("ANSWER_REVEAL_DURATION", 3.0)
+    TOTAL_DUR = countdown_dur + reveal_dur
+    
+    INTRO_DURATION = config.get("INTRO_DURATION", 2.0)
     ANIMATION_DURATION = 0.5
-    # Cache the final frame (reveal_progress=1.0) — reused for ~2.5s of the 3s reveal
-    _final_frame = [None]
-
-    def make_frame(t):
-        if t < ANIMATION_DURATION:
-            progress = t / ANIMATION_DURATION
-            eased = 1.0 - (1.0 - progress)**3
-            return render_question_frame(question, reveal_progress=eased, state="reveal")
+    
+    total_frames = int(TOTAL_DUR * fps)
+    countdown_frames = int(countdown_dur * fps)
+    
+    _final_frame_bytes = None
+    
+    for f in range(total_frames):
+        t = f / fps
+        
+        # Countdown Phase
+        if t <= countdown_dur:
+            progress = 1.0 - (t / countdown_dur)
+            if t <= INTRO_DURATION:
+                intro_p = 1.0 - (1.0 - (t / INTRO_DURATION))**3
+                arr = render_question_frame(question, timer_progress=progress, state="options", intro_progress=intro_p)
+                yield arr.tobytes()
+            else:
+                arr = render_question_frame(question, timer_progress=progress, state="options", intro_progress=1.0)
+                yield arr.tobytes()
+                
+        # Reveal Phase
         else:
-            if _final_frame[0] is None:
-                _final_frame[0] = render_question_frame(question, reveal_progress=1.0, state="reveal")
-            return _final_frame[0]
+            rel_t = t - countdown_dur
+            if rel_t < ANIMATION_DURATION:
+                progress = rel_t / ANIMATION_DURATION
+                eased = 1.0 - (1.0 - progress)**3
+                arr = render_question_frame(question, reveal_progress=eased, state="reveal")
+                yield arr.tobytes()
+            else:
+                if _final_frame_bytes is None:
+                    arr = render_question_frame(question, reveal_progress=1.0, state="reveal")
+                    _final_frame_bytes = arr.tobytes()
+                yield _final_frame_bytes
 
-    reveal_dur = config.get("ANSWER_REVEAL_DURATION")
-    return VideoClip(make_frame, duration=reveal_dur)
-
-
-def build_question_clip(
-    question: Question,
-    audio_path: Optional[Path] = None,
-) -> CompositeVideoClip:
+def build_question_audio_moviepy(question: Question, audio_path: Optional[Path] = None):
     """
-    Build a complete 13-second clip for one quiz question.
-
-    Phases:
-        0–10s: Question displayed, countdown timer, TTS narration
-        10–13s: Correct answer highlighted green, wrong answers red
+    Builds the complete 13-second audio track for the question using MoviePy Audio layers.
+    Bypasses MoviePy Video logic completely.
     """
-    countdown_dur = config.get("COUNTDOWN_DURATION")
+    from moviepy import AudioFileClip, AudioClip, CompositeAudioClip
+    import moviepy as mp
 
-    # Phase 1: countdown (10s)
-    countdown_clip = _make_countdown_clip(question)
-
-    # Phase 2: answer reveal (3s)
-    reveal_clip = _make_reveal_clip(question)
-
-    # Concatenate phases
-    video = concatenate_videoclips([countdown_clip, reveal_clip])
-
-    # ── Audio layers ─────────────────────────────────────────────────────
-    audio_clips = []
-
-    # TTS narration (starts at t=0)
+    countdown_dur = config.get("COUNTDOWN_DURATION", 10.0)
+    reveal_dur = config.get("ANSWER_REVEAL_DURATION", 3.0)
+    total_dur = countdown_dur + reveal_dur
+    
+    # Base silent track
+    base_track = AudioClip(lambda t: [0, 0], duration=total_dur, fps=44100)
+    audio_clips = [base_track]
+    
+    # TTS narration
     if audio_path and audio_path.exists():
         try:
             tts_audio = AudioFileClip(str(audio_path))
-            # Trim if longer than countdown
             if tts_audio.duration > countdown_dur:
                 tts_audio = tts_audio.subclipped(0, countdown_dur)
             audio_clips.append(tts_audio)
         except Exception as e:
-            logger.warning(f"Could not load TTS audio {audio_path}: {e}")
+            logger.warning(f"Failed to load TTS audio: {e}")
 
-    # Clock tick sound effect (plays every second during countdown with increasing volume)
+    # Clock tick sound
     try:
-        clock_tick = _get_clock_tick_audio()
-        if clock_tick is not None:
-            import moviepy as mp
-            # Play the 3-second timer audio at the end of the countdown
+        clock_path = Path(__file__).resolve().parent / "assets" / "sound" / "clock-tick-second2.mp3"
+        if clock_path.exists():
+            clock_tick = AudioFileClip(str(clock_path))
             start_at = max(0, countdown_dur - 3.0)
             tick_at_sec = clock_tick.with_start(start_at).with_effects([mp.afx.MultiplyVolume(0.8)])
             audio_clips.append(tick_at_sec)
     except Exception as e:
-        logger.debug(f"clock-tick-second.mp3 not found or error — skipping: {e}")
+        logger.debug(f"Failed to overlay clock tick: {e}")
 
-    # Correct / Wrong SFX at reveal
+    # Correct / Wrong SFX
     try:
         sfx_path = config.get("SFX_CORRECT")
-        correct_sfx = AudioFileClip(sfx_path).with_start(countdown_dur)
-        audio_clips.append(correct_sfx)
+        if sfx_path and Path(sfx_path).exists():
+            correct_sfx = AudioFileClip(sfx_path).with_start(countdown_dur)
+            audio_clips.append(correct_sfx)
     except Exception:
-        logger.debug("Correct SFX not found — skipping")
+        pass
 
-    # Woosh SFX at the end of reveal to transition to the next scene
+    # Woosh SFX
     try:
         woosh_path = Path(__file__).resolve().parent / "assets" / "sfx" / "woosh.mp3"
         if woosh_path.exists():
-            # Play woosh 0.5 seconds before the clip ends
-            woosh_sfx = AudioFileClip(str(woosh_path)).with_start(max(0, video.duration - 0.5))
+            woosh_sfx = AudioFileClip(str(woosh_path)).with_start(max(0, total_dur - 0.5))
             audio_clips.append(woosh_sfx)
-    except Exception as e:
-        logger.debug(f"woosh.mp3 not found or error — skipping: {e}")
-
-    # Mix all audio
-    if audio_clips:
-        mixed_audio = CompositeAudioClip(audio_clips)
-        # Force the audio to the video's original duration to prevent extra black frames
-        mixed_audio = mixed_audio.with_duration(video.duration)
-        video = video.with_audio(mixed_audio)
-
-    # ── Scene transition (fade out) ──
-    try:
-        import moviepy as mp
-        # Add a 0.3s fade to blue instead of black
-        video = video.with_effects([mp.vfx.FadeOut(0.3, color=(1, 65, 164))])
-    except Exception as e:
-        logger.debug(f"Could not apply FadeOut effect: {e}")
-
-    return video
+    except Exception:
+        pass
+        
+    return CompositeAudioClip(audio_clips).with_duration(total_dur)
