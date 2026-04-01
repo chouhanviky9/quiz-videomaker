@@ -271,7 +271,7 @@ def _get_badge_layer(text: str, is_logo: bool = False) -> Image.Image:
                 _badge_cache["Logo"] = logo_img
                 return logo_img
         except Exception as e:
-            logger.warning(f"Could not load logo in renderer: {e}")
+            raise ValueError(f"Could not load logo in renderer: {e}")
             
     if text in _badge_cache:
         return _badge_cache[text]

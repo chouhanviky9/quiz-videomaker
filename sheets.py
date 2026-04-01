@@ -230,6 +230,35 @@ def set_config_status(row_index: int, status_text: str, spreadsheet_id: Optional
     ).execute()
 
 
+def set_error_message(message: str, spreadsheet_id: Optional[str] = None):
+    """Write an error message to the ERROR_MSG key in the CONFIG tab."""
+    sid = spreadsheet_id or SPREADSHEET_ID
+    service = get_sheets_service()
+    
+    # Locate ERROR_MSG in column A
+    result = service.spreadsheets().values().get(
+        spreadsheetId=sid, range=f"{CONFIG_TAB}!A1:A"
+    ).execute()
+    rows = result.get("values", [])
+    
+    error_row = None
+    for i, row in enumerate(rows):
+        if row and row[0].strip().upper() == "ERROR_MSG":
+            error_row = i + 1
+            break
+            
+    if error_row is not None:
+        service.spreadsheets().values().update(
+            spreadsheetId=sid,
+            range=f"{CONFIG_TAB}!B{error_row}",
+            valueInputOption="RAW",
+            body={"values": [[message]]},
+        ).execute()
+    else:
+        logger.warning("ERROR_MSG key not found in CONFIG tab.")
+
+
+
 def append_result_row(values: list[str], spreadsheet_id: Optional[str] = None) -> None:
     """
     Appends one row to RESULT tab.
