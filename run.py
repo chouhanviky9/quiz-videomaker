@@ -119,7 +119,7 @@ def main():
                         bg_music_idx = str(config.get("BG_MUSIC", "1"))
                         selected_music_path = f"assets/sound/quizSong{bg_music_idx}.mp3"
 
-                        import urllib.request
+                        import httpx
                         from pathlib import Path
                         import shutil
 
@@ -129,14 +129,20 @@ def main():
                                 return default
                             if val.startswith("http://") or val.startswith("https://"):
                                 try:
+                                    logger.info(f"Downloading {key} from {val} ...")
                                     d_path = f"config/temp/{dl_name}"
                                     Path("config/temp").mkdir(parents=True, exist_ok=True)
-                                    req = urllib.request.Request(val, headers={'User-Agent': 'Mozilla/5.0'})
-                                    with urllib.request.urlopen(req) as res, open(d_path, 'wb') as out_f:
-                                        shutil.copyfileobj(res, out_f)
+                                    
+                                    with httpx.Client(timeout=10.0, follow_redirects=True) as client:
+                                        r = client.get(val)
+                                        r.raise_for_status()
+                                        with open(d_path, 'wb') as out_f:
+                                            out_f.write(r.content)
+                                            
+                                    logger.info(f"Successfully downloaded {key}")
                                     return d_path
                                 except Exception as e:
-                                    logger.warning(f"Failed download {key}: {e}")
+                                    logger.warning(f"Failed download {key} (Timeout or Error): {e}")
                                     return default
                             if Path(val).exists(): return val
                             return default
