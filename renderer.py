@@ -596,7 +596,7 @@ def _get_static_header_layer(question: Question) -> Image.Image:
     img = Image.new("RGBA", (VIDEO_WIDTH, VIDEO_HEIGHT), (0, 0, 0, 0))
 
     # Badges
-    qnum = _get_badge_layer(str(question.row_index))
+    qnum = _get_badge_layer(str(question.row_index - 1))
     logo = _get_badge_layer("Logo", is_logo=True)
 
     badge_w, badge_h = qnum.size
@@ -708,7 +708,7 @@ def render_question_frame(
         draw = ImageDraw.Draw(img)
 
         # 1. Question number and Logo (left to right / right to left)
-        qnum = _get_badge_layer(str(question.row_index))
+        qnum = _get_badge_layer(str(question.row_index - 1))
         logo = _get_badge_layer("Logo", is_logo=True)
         badge_w, badge_h = qnum.size
         tgt_qx = 75 - badge_w // 2
@@ -864,6 +864,21 @@ def build_question_audio_moviepy(question: Question, audio_path: Optional[Path] 
             audio_clips.append(tts_audio)
         except Exception as e:
             logger.warning(f"Failed to load TTS audio: {e}")
+
+    # Answer TTS narration (plays during the reveal phase)
+    if audio_path and audio_path.exists():
+        ans_audio_path = Path(str(audio_path).replace('q_row', 'a_row'))
+        if ans_audio_path.exists():
+            try:
+                ans_tts_audio = AudioFileClip(str(ans_audio_path))
+                # start exactly when reveal starts
+                ans_start = countdown_dur 
+                # trim if it extends beyond total reveal time
+                if ans_tts_audio.duration > reveal_dur:
+                    ans_tts_audio = ans_tts_audio.subclipped(0, reveal_dur)
+                audio_clips.append(ans_tts_audio.with_start(ans_start))
+            except Exception as e:
+                logger.warning(f"Failed to load Answer TTS audio: {e}")
 
     # Clock tick sound
     try:

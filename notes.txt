@@ -8,6 +8,10 @@ pip install -r requirements.txt
 # System Service Commands (quiz-video)
 ========================================
 
+sudo systemctl start quiz-video
+sudo systemctl restart quiz-video
+sudo systemctl enable quiz-video
+
 Start        :  sudo systemctl start quiz-video    
                 -> Starts the script in the background.
 

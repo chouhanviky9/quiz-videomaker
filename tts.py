@@ -62,6 +62,11 @@ def _build_prompt(question: Question, language: str) -> str:
     )
     return template.format(text=full_text)
 
+def _build_answer_prompt(question: Question, language: str) -> str:
+    """Build the TTS prompt for the correct answer."""
+    template = LANGUAGE_PROMPTS.get(language, DEFAULT_PROMPT)
+    return template.format(text=question.answer)
+
 
 def _save_wav(pcm_data: bytes, output_path: Path) -> None:
     """Save raw PCM bytes (24 kHz, 16-bit, mono) as a WAV file."""
@@ -141,6 +146,58 @@ def generate_question_audio(
     return output_path
 
 
+def generate_answer_audio(
+    question: Question,
+    language: str,
+    voice: str | None = None,
+) -> Path:
+    """
+    Generate TTS audio for the correct answer and save as WAV.
+    """
+    voice_name = voice or DEFAULT_VOICES.get(language, "Puck")
+    prompt = _build_answer_prompt(question, language)
+    output_path = AUDIO_DIR / f"a_row{question.row_index:03d}.wav"
+
+    if output_path.exists():
+        return output_path
+
+    logger.info(f"Generating Answer TTS for row {question.row_index}…")
+    client = genai.Client(api_key=GEMINI_API_KEY)
+
+    max_retries = 3
+    for attempt in range(1, max_retries + 1):
+        try:
+            response = client.models.generate_content(
+                model=TTS_MODEL,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_modalities=["AUDIO"],
+                    speech_config=types.SpeechConfig(
+                        voice_config=types.VoiceConfig(
+                            prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                                voice_name=voice_name,
+                            )
+                        )
+                    ),
+                ),
+            )
+
+            if not response.candidates or not response.candidates[0].content:
+                raise ValueError("No audio returned from Gemini.")
+
+            audio_data = response.candidates[0].content.parts[0].inline_data.data
+            _save_wav(audio_data, output_path)
+            return output_path
+
+        except Exception as e:
+            if attempt < max_retries:
+                time.sleep(2 ** attempt)
+            else:
+                logger.error(f"Answer TTS failed: {e}")
+                
+    return output_path
+
+
 def generate_batch_audio(
     questions: list[Question],
     language: str,
@@ -152,6 +209,8 @@ def generate_batch_audio(
     paths: dict[int, Path] = {}
 
     def _gen(idx: int, q: Question) -> tuple[int, Path]:
+        # Generate the answer simultaneously (since we wait sequentially inside this thread)
+        generate_answer_audio(q, language, voice)
         return idx, generate_question_audio(q, language, voice)
 
     # Use up to 4 threads (IO-bound Gemini API calls)
