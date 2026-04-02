@@ -4,7 +4,14 @@ import datetime
 import shutil
 from config.config import config
 from config.constant import SPREADSHEET_ID, DRIVE_FOLDER_ID, TEMP_DIR, AUDIO_DIR, FRAMES_DIR, OUTPUT_DIR
-from sheets import fetch_configs, get_pending_questions, mark_batch_done, append_result_row, move_questions_to_processed
+from sheets import (
+    fetch_configs, 
+    get_pending_questions, 
+    mark_batch_done, 
+    append_result_row, 
+    move_questions_to_processed,
+    set_error_message
+)
 
 def clear_temp_directory():
     """Wipes the temp directory and recreates the required subfolders."""
@@ -100,7 +107,7 @@ def main():
                     continue
 
                 logger.info("Detected 'Start'! Changing status to 'Processing'...")
-                from sheets import set_config_status, set_error_message
+                from sheets import set_config_status
                 set_config_status(batch_config.row_index, "Processing", spreadsheet_id)
                 set_error_message("", spreadsheet_id)
 
@@ -133,7 +140,7 @@ def main():
                                     d_path = f"config/temp/{dl_name}"
                                     Path("config/temp").mkdir(parents=True, exist_ok=True)
                                     
-                                    with httpx.Client(timeout=10.0, follow_redirects=True) as client:
+                                    with httpx.Client(timeout=30.0, follow_redirects=True) as client:
                                         r = client.get(val)
                                         r.raise_for_status()
                                         with open(d_path, 'wb') as out_f:
@@ -205,7 +212,14 @@ def main():
             time.sleep(5)
 
         except Exception as e:
+            # Major loop failure (likely persistent network error)
             logger.error(f"Unexpected error in main loop: {e}")
+            try:
+                # Only attempt to write to the sheet if SPREADSHEET_ID is available
+                if SPREADSHEET_ID:
+                    set_error_message(f"Fatal Loop Error: {str(e)}", SPREADSHEET_ID)
+            except:
+                pass 
             time.sleep(5)
 
 if __name__ == "__main__":

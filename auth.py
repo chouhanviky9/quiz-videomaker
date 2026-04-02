@@ -102,6 +102,10 @@ from googleapiclient.discovery import build
 import os
 
 from config.constant import SCOPES, GOOGLE_CREDENTIALS_PATH, GOOGLE_TOKEN_PATH
+import socket
+
+# Set a global timeout for all socket-based connections (Google API, etc.)
+socket.setdefaulttimeout(60)
 
 def get_oauth_credentials() -> Credentials:
     creds = None

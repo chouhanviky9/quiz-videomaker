@@ -16,13 +16,39 @@ QUESTIONS sheet layout (row 1 = header, data starts at row 2):
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Callable, Any
 
 from auth import get_sheets_service
 from config.constant import SPREADSHEET_ID, CONFIG_RANGE, QUESTIONS_RANGE, CONFIG_TAB, QUESTIONS_TAB
 
 logger = logging.getLogger(__name__)
+
+def retry_api(max_retries: int = 3, initial_delay: float = 2.0):
+    """Decorator to retry Google API calls with exponential backoff."""
+    def decorator(func: Callable):
+        def wrapper(*args, **kwargs):
+            retries = 0
+            delay = initial_delay
+            while True:
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    retries += 1
+                    err_str = str(e).lower()
+                    # Only retry on network-related or transient errors
+                    is_transient = any(msg in err_str for msg in ["timeout", "timed out", "connection reset", "quota", "500", "503"])
+                    
+                    if retries > max_retries or not is_transient:
+                        logger.error(f"API call failed after {retries} retries: {e}")
+                        raise e
+                    
+                    logger.warning(f"API {func.__name__} failed ({e}). Retrying in {delay}s... ({retries}/{max_retries})")
+                    time.sleep(delay)
+                    delay *= 2
+        return wrapper
+    return decorator
 
 
 # ── Data models ──────────────────────────────────────────────────────────────
@@ -54,6 +80,7 @@ class Question:
 
 # ── Sheet reading ────────────────────────────────────────────────────────────
 
+@retry_api(max_retries=3)
 def fetch_configs(spreadsheet_id: Optional[str] = None) -> list[BatchConfig]:
     """Read the CONFIG tab as vertical key/value config and return a single BatchConfig."""
     sid = spreadsheet_id or SPREADSHEET_ID
@@ -122,6 +149,7 @@ def fetch_configs(spreadsheet_id: Optional[str] = None) -> list[BatchConfig]:
     return [config], settings
 
 
+@retry_api(max_retries=3)
 def fetch_questions(spreadsheet_id: Optional[str] = None) -> list[Question]:
     """Read the QUESTIONS tab and return all question rows."""
     sid = spreadsheet_id or SPREADSHEET_ID
@@ -179,6 +207,7 @@ def get_pending_questions(spreadsheet_id: Optional[str] = None, limit: int = 0) 
     return pending
 
 
+@retry_api(max_retries=3)
 def mark_question_processed(question: Question, spreadsheet_id: Optional[str] = None):
     """Write 'YES' to the Processed column (H) for the given question row."""
     sid = spreadsheet_id or SPREADSHEET_ID
@@ -195,6 +224,7 @@ def mark_question_processed(question: Question, spreadsheet_id: Optional[str] = 
     logger.info(f"Question row {row} marked as processed")
 
 
+@retry_api(max_retries=3)
 def mark_batch_done(batch_config: BatchConfig, video_url: str, spreadsheet_id: Optional[str] = None):
     """Write STATUS=DONE and VIDEO_URL back to the CONFIG tab for this batch row."""
     import datetime
@@ -217,6 +247,7 @@ def mark_batch_done(batch_config: BatchConfig, video_url: str, spreadsheet_id: O
     logger.info(f"Batch {batch_config.batch} marked DONE in sheet row {row}")
 
 
+@retry_api(max_retries=3)
 def set_config_status(row_index: int, status_text: str, spreadsheet_id: Optional[str] = None):
     """Write arbitrary status text back to the STATUS dropdown cell (Column B) in the CONFIG tab."""
     sid = spreadsheet_id or SPREADSHEET_ID
@@ -230,6 +261,7 @@ def set_config_status(row_index: int, status_text: str, spreadsheet_id: Optional
     ).execute()
 
 
+@retry_api(max_retries=3)
 def set_error_message(message: str, spreadsheet_id: Optional[str] = None):
     """Write an error message to the ERROR_MSG key in the CONFIG tab."""
     sid = spreadsheet_id or SPREADSHEET_ID
@@ -259,6 +291,7 @@ def set_error_message(message: str, spreadsheet_id: Optional[str] = None):
 
 
 
+@retry_api(max_retries=3)
 def append_result_row(values: list[str], spreadsheet_id: Optional[str] = None) -> None:
     """
     Appends one row to RESULT tab.
@@ -275,6 +308,7 @@ def append_result_row(values: list[str], spreadsheet_id: Optional[str] = None) -
     ).execute()
 
 
+@retry_api(max_retries=3)
 def _get_sheet_id_by_title(service, spreadsheet_id: str, title: str) -> int:
     meta = service.spreadsheets().get(
         spreadsheetId=spreadsheet_id,
@@ -285,6 +319,7 @@ def _get_sheet_id_by_title(service, spreadsheet_id: str, title: str) -> int:
         if props.get("title") == title:
             return props["sheetId"]
     raise ValueError(f"Sheet tab not found: {title}")
+@retry_api(max_retries=3)
 def move_questions_to_processed(questions: list[Question], spreadsheet_id: Optional[str] = None):
     """
     Moves questions from QUESTIONS tab to PROCESSED tab.
@@ -333,6 +368,7 @@ def move_questions_to_processed(questions: list[Question], spreadsheet_id: Optio
         ).execute()
         logger.info(f"Deleted {len(questions)} rows from QUESTIONS tab")
 
+@retry_api(max_retries=3)
 def insert_result_row_top(values: list[str], spreadsheet_id: Optional[str] = None, tab_name: str = "RESULT") -> None:
     """
     Inserts a new row just below the header in RESULT (row 2), shifting existing rows down,

@@ -25,8 +25,28 @@ from config.constant import (
 )
 from sheets import Question, BatchConfig
 from renderer import _load_font
+import subprocess
+import json
 
+ROOT_DIR = Path(__file__).resolve().parent
 logger = logging.getLogger(__name__)
+
+def get_video_duration(file_path: str) -> float:
+    """Uses ffprobe to get the exact duration of a video file."""
+    try:
+        import imageio_ffmpeg
+        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+        ffprobe_exe = ffmpeg_exe.replace("ffmpeg", "ffprobe")
+        
+        cmd = [
+            ffprobe_exe, "-v", "error", "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1", file_path
+        ]
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
+        return float(result.stdout.strip())
+    except Exception as e:
+        logger.warning(f"Could not determine video duration with ffprobe: {e}")
+        return 0.0
 
 
 # ── Intro / End screen builders ──────────────────────────────────────────────
@@ -91,9 +111,9 @@ def _build_endscreen_clip(logo_path: Optional[str] = None):
     if logo_path and Path(logo_path).exists():
         try:
             logo = Image.open(logo_path).convert("RGBA")
-            logo.thumbnail((400, 400))
+            logo.thumbnail((310, 310))
             lx = (VIDEO_WIDTH - logo.width) // 2
-            ly = (VIDEO_HEIGHT - logo.height) // 2 - 150
+            ly = (VIDEO_HEIGHT - logo.height) // 2 - 212
             img.paste(logo, (lx, ly), mask=logo)
         except Exception as e:
             logger.warning(f"Could not load logo for endscreen: {e}")
@@ -208,10 +228,32 @@ def compose_video(
         audio_path = audio_paths[i] if i < len(audio_paths) else None
         clips_for_audio.append(build_question_audio_moviepy(question, audio_path))
 
-    # Append endscreen silence
-    endscreen_dur = config.get("ENDSCREEN_DURATION", 5)
-    silence = AudioClip(lambda t: [0, 0], duration=endscreen_dur, fps=44100)
-    clips_for_audio.append(silence)
+    # Append endscreen audio (from ending.mp4 if it exists, else silence)
+    custom_outro = ROOT_DIR / "assets" / "ending.mp4"
+    logger.info(f"Checking for custom outro audio at: {custom_outro.absolute()}")
+    if custom_outro.exists():
+        actual_dur = get_video_duration(str(custom_outro))
+        if actual_dur > 0:
+            logger.info(f"Detected actual duration of {custom_outro.name}: {actual_dur:.2f}s")
+        else:
+            actual_dur = config.get("ENDSCREEN_DURATION", 15)
+
+        try:
+            logger.info(f"Attempting to load outro audio from {custom_outro.name}...")
+            outro_audio = AudioFileClip(str(custom_outro))
+            # Ensure it matches the video duration exactly
+            outro_audio = outro_audio.with_duration(actual_dur)
+            logger.info(f"Custom outro audio duration: {outro_audio.duration:.2f}s")
+            clips_for_audio.append(outro_audio)
+        except Exception as e:
+            logger.warning(f"Could not load audio from ending.mp4, using silence for {actual_dur:.2f}s: {e}")
+            silence = AudioClip(lambda t: [0, 0], duration=actual_dur, fps=44100)
+            clips_for_audio.append(silence)
+    else:
+        endscreen_dur = config.get("ENDSCREEN_DURATION", 5)
+        logger.info(f"No custom ending.mp4 found. Using {endscreen_dur}s static silence.")
+        silence = AudioClip(lambda t: [0, 0], duration=endscreen_dur, fps=44100)
+        clips_for_audio.append(silence)
 
     master_track = concatenate_audioclips(clips_for_audio)
 
@@ -258,28 +300,54 @@ def compose_video(
         rendered_paths[idx] = p
         logger.info(f"✓ Q{idx + 1} built -> {p.name}")
 
-    # Build endscreen instantly in main thread
+    # Build endscreen
     logger.info("Building endscreen video...")
-    endscreen_img = _build_endscreen_clip(logo_path=logo_path)
     endscreen_out = tmp_dir / "endscreen.mp4"
-    cmd_e = [
-        ffmpeg_exe, "-y",
-        "-f", "rawvideo", "-vcodec", "rawvideo",
-        "-s", f"{VIDEO_WIDTH}x{VIDEO_HEIGHT}", "-pix_fmt", "rgb24", "-r", str(FPS),
-        "-i", "-", "-an",
-        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "ultrafast",
-        str(endscreen_out)
-    ]
-    proc_e = subprocess.Popen(cmd_e, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    
-    endscreen_dur = config.get("ENDSCREEN_DURATION", 5)
-    endscreen_frames = int(endscreen_dur * FPS)
-    endscreen_bytes = endscreen_img.tobytes()
-    
-    for f in range(endscreen_frames):
-        proc_e.stdin.write(endscreen_bytes)
-    proc_e.stdin.close()
-    proc_e.wait()
+    custom_outro = ROOT_DIR / "assets" / "ending.mp4"
+
+    if custom_outro.exists():
+        logger.info("Using custom assets/ending.mp4 video file...")
+        cmd_e = [ffmpeg_exe, "-y", "-i", str(custom_outro)]
+        
+        if logo_path and Path(logo_path).exists():
+            logger.info("Overlaying logo onto custom ending.mp4...")
+            cmd_e.extend(["-i", str(logo_path)])
+            cmd_e.extend([
+                "-filter_complex",
+                f"[1:v]scale=310:310:force_original_aspect_ratio=decrease[logo];[0:v]scale={VIDEO_WIDTH}:{VIDEO_HEIGHT},setsar=1[bg];[bg][logo]overlay=(W-w)/2:(H-h)/2-212[v]",
+                "-map", "[v]"
+            ])
+        else:
+            cmd_e.extend(["-s", f"{VIDEO_WIDTH}x{VIDEO_HEIGHT}"])
+
+        cmd_e.extend([
+            "-an", # No audio (handled in Phase A)
+            "-r", str(FPS),
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "ultrafast",
+            str(endscreen_out)
+        ])
+        subprocess.run(cmd_e, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        logger.info("Generating static blue endscreen...")
+        endscreen_img = _build_endscreen_clip(logo_path=logo_path)
+        cmd_e = [
+            ffmpeg_exe, "-y",
+            "-f", "rawvideo", "-vcodec", "rawvideo",
+            "-s", f"{VIDEO_WIDTH}x{VIDEO_HEIGHT}", "-pix_fmt", "rgb24", "-r", str(FPS),
+            "-i", "-", "-an",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "ultrafast",
+            str(endscreen_out)
+        ]
+        proc_e = subprocess.Popen(cmd_e, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
+        endscreen_dur = config.get("ENDSCREEN_DURATION", 5)
+        endscreen_frames = int(endscreen_dur * FPS)
+        endscreen_bytes = endscreen_img.tobytes()
+        
+        for f in range(endscreen_frames):
+            proc_e.stdin.write(endscreen_bytes)
+        proc_e.stdin.close()
+        proc_e.wait()
 
     # ── Phase C: The Zero-Loss Demux Concat ───────────────────────────────────────
     logger.info("Executing instantaneous FFmpeg Concat Phase...")

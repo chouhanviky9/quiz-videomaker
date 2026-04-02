@@ -78,6 +78,7 @@ def clear_render_caches():
     _bg_cache = None
     _badge_cache.clear()
     _qtext_cache.clear()
+    _badge_cache.clear()
     _option_card_cache.clear()
     _static_layer_cache.clear()
     _header_layer_cache.clear()
