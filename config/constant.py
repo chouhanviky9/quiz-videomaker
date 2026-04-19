@@ -30,6 +30,9 @@ DRIVE_FOLDER_ID = os.getenv("DRIVE_FOLDER_ID", "")
 GOOGLE_CREDENTIALS_PATH = os.getenv("GOOGLE_CREDENTIALS_PATH", "credentials.json")
 GOOGLE_TOKEN_PATH = os.getenv("GOOGLE_TOKEN_PATH", "token.json")
 
+# Service account JSON for Cloud TTS operations
+GOOGLE_CREDENTIALS_TTS_PATH = BASE_DIR.parent / "credential-for-tts-new.json"
+
 # ── Google API Scopes ────────────────────────────────────────────────────────
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",  # read + write STATUS/VIDEO_URL
@@ -55,22 +58,22 @@ FONT_BOLD = str(FONTS_DIR / "Montserrat-Bold.ttf")
 FONT_EXTRABOLD = str(FONTS_DIR / "Montserrat-ExtraBold.ttf")
 FONT_REGULAR = str(FONTS_DIR / "Montserrat-Regular.ttf")
 
-# ── Gemini TTS ───────────────────────────────────────────────────────────────
-TTS_MODEL = "gemini-2.5-flash-preview-tts"
+# ── Google Cloud TTS ─────────────────────────────────────────────────────────
 TTS_SAMPLE_RATE = 24000   # 24 kHz PCM output
 
 # Default voices per language (client can override in CONFIG tab)
+# Using high-quality Journey and Neural2 voices
 DEFAULT_VOICES = {
-    "en": "Puck",
-    "fr": "Kore",
-    "es": "Aoede",
-    "de": "Charon",
-    "ar": "Sadachbia",
-    "pt": "Achernar",
-    "hi": "Algieba",
-    "ja": "Callirrhoe",
-    "ko": "Autonoe",
-    "tr": "Gacrux",
+    "en": "en-US-Chirp3-HD-Rasalgethi",
+    "fr": "fr-FR-Chirp3-HD-Rasalgethi",
+    "es": "es-ES-Chirp3-HD-Rasalgethi",
+    "de": "de-DE-Chirp3-HD-Rasalgethi",
+    "ar": "ar-XA-Chirp3-HD-Rasalgethi",
+    "pt": "pt-BR-Chirp3-HD-Rasalgethi",
+    "hi": "hi-IN-Chirp3-HD-Rasalgethi",
+    "ja": "ja-JP-Chirp3-HD-Rasalgethi",
+    "ko": "ko-KR-Chirp3-HD-Rasalgethi",
+    "tr": "tr-TR-Chirp3-HD-Rasalgethi",
 }
 
 # ── Sound effects ────────────────────────────────────────────────────────────

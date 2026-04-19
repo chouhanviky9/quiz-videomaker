@@ -37,6 +37,8 @@ def get_video_duration(file_path: str) -> float:
         import imageio_ffmpeg
         ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
         ffprobe_exe = ffmpeg_exe.replace("ffmpeg", "ffprobe")
+        if not Path(ffprobe_exe).exists():
+            ffprobe_exe = "ffprobe"
         
         cmd = [
             ffprobe_exe, "-v", "error", "-show_entries", "format=duration",
@@ -141,7 +143,10 @@ def _render_raw_h264_clip(args):
     Worker function to render a SINGLE question using a pure FFmpeg pipe to a temporary file.
     This avoids Python IPC bottlenecks by saving directly to the NVMe disk natively.
     """
-    idx, question, tmp_dir = args
+    idx, question, tmp_dir, config_state = args
+    from config.config import config
+    config.update_from_dict(config_state)
+    
     import logging
     from pathlib import Path
     import subprocess
@@ -282,7 +287,7 @@ def compose_video(
     tmp_dir = Path(tempfile.mkdtemp(prefix="quiz_tmp_raw_"))
     logger.info(f"Spinning up multicore processes for {len(questions)} elements...")
     
-    worker_args = [(i, q, str(tmp_dir)) for i, q in enumerate(questions)]
+    worker_args = [(i, q, str(tmp_dir), config._data.copy()) for i, q in enumerate(questions)]
     rendered_paths = {}
 
     max_w = min(2, len(questions))

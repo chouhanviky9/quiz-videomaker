@@ -55,11 +55,15 @@ def process_batch_of_questions(
 
     # Generate TTS audio
     logger.info(f"─── Phase 1: Generating TTS audio (Language: {batch_config.language.upper()}) ───")
-    audio_paths = generate_batch_audio(
-        questions=questions,
-        language=batch_config.language,
-        voice=batch_config.voice or None,
-    )
+    try:
+        audio_paths = generate_batch_audio(
+            questions=questions,
+            language=batch_config.language,
+            voice=batch_config.voice or None,
+        )
+    except RuntimeError as e:
+        logger.error(f"TTS Generation failed: {e}")
+        raise e # Let the main loop handle the status update
 
     # Compose video
     logger.info("─── Phase 2: Rendering video ───")

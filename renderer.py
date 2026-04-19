@@ -86,6 +86,7 @@ def clear_render_caches():
     _timer_pattern_cache.clear()
     _flattened_options_cache.clear()
     _flattened_header_cache.clear()
+    _options_format_cache.clear()
 
 # ── Layout constants ─────────────────────────────────────────────────────────
 HEADER_HEIGHT = 380
@@ -189,7 +190,7 @@ def _text_center(
     cy = y1 + (y2 - y1) / 2
     
     # Get exact bounding box of the rendered text pixels
-    bbox = draw.textbbox((0, 0), text, font=font)
+    bbox = draw.textbbox((0, 0), text, font=font, align="center")
     tw = bbox[2] - bbox[0]
     th = bbox[3] - bbox[1]
     
@@ -199,8 +200,8 @@ def _text_center(
     
     # 3D embossed shadow
     if shadow_offset > 0:
-        draw.text((tx + shadow_offset, ty + shadow_offset), text, font=font, fill=shadow_color)
-    draw.text((tx, ty), text, font=font, fill=fill)
+        draw.text((tx + shadow_offset, ty + shadow_offset), text, font=font, fill=shadow_color, align="center")
+    draw.text((tx, ty), text, font=font, fill=fill, align="center")
 
 
 def _wrap_text(text: str, font: ImageFont.FreeTypeFont, max_width: int) -> str:
@@ -468,9 +469,74 @@ def _get_timer_pattern(progress: float) -> Image.Image:
 
 
 _option_card_cache = {}
+_options_format_cache: dict[int, tuple[int, dict[str, str]]] = {}
 
-def _get_option_card_layer(letter: str, text: str, card_state: str = "normal") -> Image.Image:
-    key = (letter, text, card_state)
+def _get_optimal_options_formatting(question: Question) -> tuple[int, dict[str, str]]:
+    """Determine the max shared font size and wrap text so all 4 options fit their bounding boxes."""
+    if question.row_index in _options_format_cache:
+        return _options_format_cache[question.row_index]
+        
+    SCALE = 2
+    def s(val: int | float) -> int: return int(val * SCALE)
+    
+    raw_options = {
+        "A": question.option_a,
+        "B": question.option_b,
+        "C": question.option_c,
+        "D": question.option_d,
+    }
+    
+    dummy_img = Image.new("RGB", (1, 1))
+    dummy_draw = ImageDraw.Draw(dummy_img)
+
+    max_font_size = 70
+    min_font_size = 36
+    
+    margin = 16
+    ox = s(margin)
+    text_area_left = ox + s(150)
+    text_area_right = ox + s(OPTION_W - 20)
+    max_w = text_area_right - text_area_left
+    max_h = s(OPTION_H - 10)
+    
+    font_path = config.get("FONT_BOLD")
+    
+    for size in range(max_font_size, min_font_size - 1, -2):
+        opt_font = _load_font(font_path, s(size))
+        fits = True
+        wrapped_options = {}
+        for letter, text in raw_options.items():
+            if not text:
+                wrapped_options[letter] = ""
+                continue
+            
+            wrapped = _wrap_text(text.upper(), opt_font, max_w)
+            bbox = dummy_draw.textbbox((0, 0), wrapped, font=opt_font, align="center")
+            tw = bbox[2] - bbox[0]
+            th = bbox[3] - bbox[1]
+            
+            if th > max_h or tw > max_w:
+                fits = False
+                break
+                
+            wrapped_options[letter] = wrapped
+            
+        if fits:
+            _options_format_cache[question.row_index] = (size, wrapped_options)
+            return size, wrapped_options
+            
+    # Fallback if extremely long text
+    opt_font = _load_font(font_path, s(min_font_size))
+    wrapped_options = {
+        letter: _wrap_text((text or "").upper(), opt_font, max_w)
+        for letter, text in raw_options.items()
+    }
+    _options_format_cache[question.row_index] = (min_font_size, wrapped_options)
+    return min_font_size, wrapped_options
+
+
+def _get_option_card_layer(letter: str, text: str, card_state: str = "normal", font_size: int = 70) -> Image.Image:
+    key = (letter, text, card_state, font_size)
     if key in _option_card_cache:
         return _option_card_cache[key]
         
@@ -505,7 +571,7 @@ def _get_option_card_layer(letter: str, text: str, card_state: str = "normal") -
         outline = config.get("COLOR_BLACK")
         border_w = s(4)
 
-    opt_font = _load_font(config.get("FONT_BOLD"), s(70))
+    opt_font = _load_font(config.get("FONT_BOLD"), s(font_size))
     badge_font = _load_font("assets/fonts/Atma-Bold.ttf", s(70))
 
     # ── Dark bottom shadow for raised 3D depth ──
@@ -550,7 +616,7 @@ def _get_option_card_layer(letter: str, text: str, card_state: str = "normal") -
     text_area_left = ox + s(150)  # Moved 10px right to maintain gap from badge
     text_area_right = ox + s(OPTION_W - 20)
     text_shadow = 0
-    _text_center(draw, text.upper(), opt_font, (text_area_left, oy, text_area_right, oy + s(OPTION_H)), text_color,
+    _text_center(draw, text, opt_font, (text_area_left, oy, text_area_right, oy + s(OPTION_H)), text_color,
                  shadow_offset=text_shadow, shadow_color=(0, 0, 0, 0))
 
     card_1x = img_2x.resize((OPTION_W + margin*2, OPTION_H + margin*2), Image.Resampling.LANCZOS)
@@ -627,11 +693,12 @@ def _get_static_question_layer(question: Question) -> Image.Image:
 
     # Option cards at final positions
     margin = 16
+    opt_font_size, opt_texts = _get_optimal_options_formatting(question)
     options = [
-        ("A", question.option_a),
-        ("B", question.option_b),
-        ("C", question.option_c),
-        ("D", question.option_d),
+        ("A", opt_texts["A"]),
+        ("B", opt_texts["B"]),
+        ("C", opt_texts["C"]),
+        ("D", opt_texts["D"]),
     ]
     positions = [
         (OPTION_GRID_LEFT, OPTIONS_Y),
@@ -640,7 +707,7 @@ def _get_static_question_layer(question: Question) -> Image.Image:
         (OPTION_GRID_LEFT + OPTION_W + OPTION_GAP_X, OPTIONS_Y + OPTION_H + OPTION_GAP_Y),
     ]
     for (letter, text), (tgt_x, tgt_y) in zip(options, positions):
-        card = _get_option_card_layer(letter, text)
+        card = _get_option_card_layer(letter, text, font_size=opt_font_size)
         img.paste(card, (tgt_x - margin, tgt_y - margin), mask=card)
 
     _static_layer_cache[question.row_index] = img
@@ -689,11 +756,12 @@ def render_question_frame(
     """
     Render a single quiz frame as a numpy array (H, W, 3).
     """
+    opt_font_size, opt_texts = _get_optimal_options_formatting(question)
     options = [
-        ("A", question.option_a),
-        ("B", question.option_b),
-        ("C", question.option_c),
-        ("D", question.option_d),
+        ("A", opt_texts["A"]),
+        ("B", opt_texts["B"]),
+        ("C", opt_texts["C"]),
+        ("D", opt_texts["D"]),
     ]
     positions = [
         (OPTION_GRID_LEFT, OPTIONS_Y),
@@ -731,7 +799,7 @@ def render_question_frame(
 
         if state == "options":
             for (letter, text), (tgt_x, tgt_y) in zip(options, positions):
-                card = _get_option_card_layer(letter, text)
+                card = _get_option_card_layer(letter, text, font_size=opt_font_size)
                 startY = HEADER_HEIGHT
                 cy = int(startY + (tgt_y - margin - startY) * intro_progress)
                 img.paste(card, (tgt_x - margin, cy), mask=card)
@@ -761,7 +829,7 @@ def render_question_frame(
 
         for (letter, text), (tgt_x, tgt_y) in zip(options, positions):
             if letter == question.letter:
-                card = _get_option_card_layer(letter, text, "correct")
+                card = _get_option_card_layer(letter, text, "correct", font_size=opt_font_size)
                 
                 # Reveal animation: scale up correct option slightly
                 scale = 1.0 + 0.05 * reveal_progress

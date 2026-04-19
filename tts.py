@@ -1,40 +1,31 @@
 """
-Gemini TTS — generates narration audio for quiz questions.
-
-Uses the gemini-2.5-flash-preview-tts model to produce 24 kHz WAV files.
+Google Cloud TTS — generates narration audio for quiz questions.
 """
 
 from __future__ import annotations
 
-import io
 import logging
-import struct
 import time
-import wave
 from pathlib import Path
 
-from google import genai
-from google.genai import types
+from google.cloud import texttospeech
 
 from config.constant import (
     GEMINI_API_KEY,
-    TTS_MODEL,
     TTS_SAMPLE_RATE,
     AUDIO_DIR,
     DEFAULT_VOICES,
+    GOOGLE_CREDENTIALS_TTS_PATH,
 )
 from sheets import Question
 
 logger = logging.getLogger(__name__)
 
 # ── Language prompt templates ────────────────────────────────────────────────
-# The model auto-detects language from text, but an explicit prompt helps
-# with pronunciation, pacing, and style.
-
 LANGUAGE_PROMPTS = {
     "en": "Read this quiz question clearly and at a steady pace: {text}",
     "fr": "Lis cette question de quiz clairement et à un rythme régulier : {text}",
-    "es": "Lee esta pregunta de quiz de forma clara y a un ritmo constante: {text}",
+    "es": "Lee esta pregunta de quiz de forma clara y a un rythme constante: {text}",
     "de": "Lies diese Quizfrage klar und in gleichmäßigem Tempo vor: {text}",
     "ar": "اقرأ سؤال الاختبار هذا بوضوح وبوتيرة ثابتة: {text}",
     "pt": "Leia esta pergunta do quiz de forma clara e em ritmo constante: {text}",
@@ -44,183 +35,112 @@ LANGUAGE_PROMPTS = {
     "tr": "Bu sınav sorusunu net ve sabit bir tempoda okuyun: {text}",
 }
 
-# Fallback for unknown languages
-DEFAULT_PROMPT = "Read this quiz question clearly: {text}"
-
-
 def _build_prompt(question: Question, language: str) -> str:
-    """Build the full TTS prompt including question + options."""
-    template = LANGUAGE_PROMPTS.get(language, DEFAULT_PROMPT)
-
-    # Include options so the voice reads them out
-    full_text = (
-        f"{question.text}\n"
-        # f"A: {question.option_a}\n"
-        # f"B: {question.option_b}\n"
-        # f"C: {question.option_c}\n"
-        # f"D: {question.option_d}"
-    )
-    return template.format(text=full_text)
+    return f"{question.text}\n"
 
 def _build_answer_prompt(question: Question, language: str) -> str:
-    """Build the TTS prompt for the correct answer."""
-    template = LANGUAGE_PROMPTS.get(language, DEFAULT_PROMPT)
-    return template.format(text=question.answer)
+    return question.answer
 
+def _get_voice_params(voice: str | None, language: str) -> texttospeech.VoiceSelectionParams:
+    voice_name = voice or DEFAULT_VOICES.get(language, "en-US-Journey-F")
+    
+    # Extract language code from voice_name (e.g. 'en-US' from 'en-US-Journey-F')
+    lang_code = "-".join(voice_name.split("-")[:2]) if "-" in voice_name else language
 
-def _save_wav(pcm_data: bytes, output_path: Path) -> None:
-    """Save raw PCM bytes (24 kHz, 16-bit, mono) as a WAV file."""
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with wave.open(str(output_path), "wb") as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)  # 16-bit = 2 bytes
-        wf.setframerate(TTS_SAMPLE_RATE)
-        wf.writeframes(pcm_data)
+    return texttospeech.VoiceSelectionParams(
+        language_code=lang_code,
+        name=voice_name
+    )
 
+from google.oauth2 import service_account
+
+def _generate_audio_cloud(
+    text: str,
+    output_path: Path,
+    row_index: int,
+    language: str,
+    voice: str | None = None,
+) -> Path:
+    if output_path.exists() and output_path.stat().st_size > 0:
+        logger.info(f"Audio already exists: {output_path.name} — skipping")
+        return output_path
+
+    voice_params = _get_voice_params(voice, language)
+    logger.info(f"Generating TTS for row {row_index} ({voice_params.name}/{language})…")
+
+    # Initialize client using Service Account JSON
+    credentials = service_account.Credentials.from_service_account_file(GOOGLE_CREDENTIALS_TTS_PATH)
+    client = texttospeech.TextToSpeechClient(credentials=credentials)
+
+    synthesis_input = texttospeech.SynthesisInput(text=text)
+    
+    # LINEAR16 includes the WAV header natively
+    audio_config = texttospeech.AudioConfig(
+        audio_encoding=texttospeech.AudioEncoding.LINEAR16,
+        sample_rate_hertz=TTS_SAMPLE_RATE,
+    )
+
+    max_retries = 3
+    for attempt in range(1, max_retries + 1):
+        try:
+            response = client.synthesize_speech(
+                input=synthesis_input, 
+                voice=voice_params, 
+                audio_config=audio_config
+            )
+
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_bytes(response.audio_content)
+            
+            logger.info(f"Saved: {output_path.name} ({len(response.audio_content)} bytes)")
+            return output_path
+
+        except Exception as e:
+            if attempt < max_retries:
+                wait = 2 ** attempt
+                logger.warning(f"TTS attempt {attempt}/{max_retries} failed for row {row_index}: {e} — retrying in {wait}s…")
+                time.sleep(wait)
+            else:
+                logger.error(f"TTS failed after {max_retries} attempts for row {row_index}: {e}")
+                raise RuntimeError(f"TTS failed for Question Row {row_index}: {e}")
+
+    return output_path
 
 def generate_question_audio(
     question: Question,
     language: str,
     voice: str | None = None,
 ) -> Path:
-    """
-    Generate TTS audio for a single question and save as WAV.
-
-    Returns the path to the saved WAV file.
-    """
-    voice_name = voice or DEFAULT_VOICES.get(language, "Puck")
     prompt = _build_prompt(question, language)
     output_path = AUDIO_DIR / f"q_row{question.row_index:03d}.wav"
-
-    # Skip if already generated (idempotent)
-    if output_path.exists():
-        logger.info(f"Audio already exists: {output_path.name} — skipping")
-        return output_path
-
-    logger.info(f"Generating TTS for row {question.row_index} ({voice_name}/{language})…")
-
-    client = genai.Client(api_key=GEMINI_API_KEY)
-
-    max_retries = 3
-    for attempt in range(1, max_retries + 1):
-        try:
-            response = client.models.generate_content(
-                model=TTS_MODEL,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_modalities=["AUDIO"],
-                    speech_config=types.SpeechConfig(
-                        voice_config=types.VoiceConfig(
-                            prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                                voice_name=voice_name,
-                            )
-                        )
-                    ),
-                ),
-            )
-
-            # Extract raw PCM audio from response
-            if not response.candidates:
-                raise ValueError("No candidates returned from Gemini.")
-
-            candidate = response.candidates[0]
-
-            if not candidate.content or not candidate.content.parts:
-                logger.error(f"TTS Model returned unexpected structure: {candidate}")
-                raise ValueError("No audio parts found in response.")
-
-            audio_data = candidate.content.parts[0].inline_data.data
-            _save_wav(audio_data, output_path)
-            logger.info(f"Saved: {output_path.name} ({len(audio_data)} bytes)")
-            return output_path
-
-        except Exception as e:
-            if attempt < max_retries:
-                wait = 2 ** attempt  # 2s, 4s, 8s
-                logger.warning(f"TTS attempt {attempt}/{max_retries} failed for row {question.row_index}: {e} — retrying in {wait}s…")
-                time.sleep(wait)
-            else:
-                logger.error(f"TTS failed after {max_retries} attempts for row {question.row_index}: {e}")
-                return output_path  # return path even if file doesn't exist; renderer handles missing audio
-
-    return output_path
-
+    return _generate_audio_cloud(prompt, output_path, question.row_index, language, voice)
 
 def generate_answer_audio(
     question: Question,
     language: str,
     voice: str | None = None,
 ) -> Path:
-    """
-    Generate TTS audio for the correct answer and save as WAV.
-    """
-    voice_name = voice or DEFAULT_VOICES.get(language, "Puck")
     prompt = _build_answer_prompt(question, language)
     output_path = AUDIO_DIR / f"a_row{question.row_index:03d}.wav"
-
-    if output_path.exists():
-        return output_path
-
-    logger.info(f"Generating Answer TTS for row {question.row_index}…")
-    client = genai.Client(api_key=GEMINI_API_KEY)
-
-    max_retries = 3
-    for attempt in range(1, max_retries + 1):
-        try:
-            response = client.models.generate_content(
-                model=TTS_MODEL,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_modalities=["AUDIO"],
-                    speech_config=types.SpeechConfig(
-                        voice_config=types.VoiceConfig(
-                            prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                                voice_name=voice_name,
-                            )
-                        )
-                    ),
-                ),
-            )
-
-            if not response.candidates or not response.candidates[0].content:
-                raise ValueError("No audio returned from Gemini.")
-
-            audio_data = response.candidates[0].content.parts[0].inline_data.data
-            _save_wav(audio_data, output_path)
-            return output_path
-
-        except Exception as e:
-            if attempt < max_retries:
-                time.sleep(2 ** attempt)
-            else:
-                logger.error(f"Answer TTS failed: {e}")
-                
-    return output_path
-
+    return _generate_audio_cloud(prompt, output_path, question.row_index, language, voice)
 
 def generate_batch_audio(
     questions: list[Question],
     language: str,
     voice: str | None = None,
 ) -> list[Path]:
-    """Generate TTS audio for all questions in parallel. Returns list of WAV paths."""
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-
-    paths: dict[int, Path] = {}
-
-    def _gen(idx: int, q: Question) -> tuple[int, Path]:
-        # Generate the answer simultaneously (since we wait sequentially inside this thread)
+    paths: list[Path] = []
+    
+    for i, q in enumerate(questions):
+        logger.info(f"Processing TTS for question {i+1}/{len(questions)}...")
+        
         generate_answer_audio(q, language, voice)
-        return idx, generate_question_audio(q, language, voice)
+        # Small delay to keep it polite, but no longer 7s
+        time.sleep(0.05)
+        path = generate_question_audio(q, language, voice)
+        time.sleep(0.05)
+        
+        paths.append(path)
+        logger.info(f"TTS {i + 1}/{len(questions)} done → {path.name}")
 
-    # Use up to 4 threads (IO-bound Gemini API calls)
-    max_workers = min(4, len(questions))
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futures = {pool.submit(_gen, i, q): i for i, q in enumerate(questions)}
-        for future in as_completed(futures):
-            idx, path = future.result()
-            paths[idx] = path
-            logger.info(f"TTS {idx + 1}/{len(questions)} done → {path.name}")
-
-    # Return in original order
-    return [paths[i] for i in range(len(questions))]
+    return paths
